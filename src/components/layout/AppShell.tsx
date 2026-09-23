@@ -108,10 +108,10 @@ export function AppShell({
         </div>
       ) : null}
 
-      <div className="mx-auto flex min-h-dvh max-w-7xl">
+      <div className="flex min-h-dvh w-full">
         <aside
           className={cn(
-            "fixed inset-y-0 left-0 z-40 flex w-[min(100%,16rem)] flex-col border-r border-ink/10 bg-ink text-stone transition-transform duration-200 lg:static lg:translate-x-0",
+            "fixed inset-y-0 left-0 z-40 flex w-[min(100%,16rem)] shrink-0 flex-col border-r border-ink/10 bg-ink text-stone transition-transform duration-200 lg:static lg:translate-x-0",
             open ? "translate-x-0" : "-translate-x-full",
           )}
         >
@@ -188,8 +188,8 @@ export function AppShell({
           />
         ) : null}
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-ink/8 bg-stone/85 px-3 py-3 backdrop-blur-md sm:px-6">
+        <div className="flex min-w-0 flex-1 flex-col lg:pl-0">
+          <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-ink/8 bg-stone/85 px-4 py-3 backdrop-blur-md sm:px-6 lg:px-8">
             <button
               type="button"
               className="rounded-xl border border-ink/10 bg-white p-2 lg:hidden"
@@ -205,7 +205,9 @@ export function AppShell({
             </div>
           </header>
 
-          <main className="flex-1 px-3 py-4 sm:px-6 sm:py-6">{children}</main>
+          <main className="w-full flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
+            {children}
+          </main>
         </div>
       </div>
     </div>
