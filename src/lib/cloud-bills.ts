@@ -38,6 +38,79 @@ export async function listPaidBills(orgId: string): Promise<PaidBill[]> {
   return (data || []) as PaidBill[];
 }
 
+import type { ReportPeriod } from "@/lib/types";
+import { dayKey, startOfMonth, startOfWeek, startOfYear } from "@/lib/utils";
+
+export type SpendDashboard = {
+  period: ReportPeriod;
+  periodSpent: number;
+  todaySpent: number;
+  monthSpent: number;
+  billCount: number;
+  periodBillCount: number;
+  recent: PaidBill[];
+  periodBills: PaidBill[];
+};
+
+function periodStart(period: ReportPeriod): Date | null {
+  const now = new Date();
+  switch (period) {
+    case "today":
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    case "week":
+      return startOfWeek(now);
+    case "month":
+      return startOfMonth(now);
+    case "year":
+      return startOfYear(now);
+    case "all":
+      return null;
+  }
+}
+
+function inPeriod(paidAt: string, period: ReportPeriod): boolean {
+  const start = periodStart(period);
+  if (!start) return true;
+  const day = String(paidAt).slice(0, 10);
+  return day >= dayKey(start);
+}
+
+export async function getSpendDashboard(
+  orgId: string,
+  period: ReportPeriod = "all",
+): Promise<SpendDashboard> {
+  const bills = await listPaidBills(orgId);
+  const today = dayKey();
+  const monthPrefix = today.slice(0, 7);
+
+  let todaySpent = 0;
+  let monthSpent = 0;
+  let periodSpent = 0;
+  const periodBills: PaidBill[] = [];
+
+  for (const b of bills) {
+    const amt = Number(b.amount) || 0;
+    const day = String(b.paid_at).slice(0, 10);
+    if (day === today) todaySpent += amt;
+    if (day.startsWith(monthPrefix)) monthSpent += amt;
+    if (inPeriod(b.paid_at, period)) {
+      periodSpent += amt;
+      periodBills.push(b);
+    }
+  }
+
+  return {
+    period,
+    periodSpent: Math.round(periodSpent * 100) / 100,
+    todaySpent: Math.round(todaySpent * 100) / 100,
+    monthSpent: Math.round(monthSpent * 100) / 100,
+    billCount: bills.length,
+    periodBillCount: periodBills.length,
+    recent: bills.slice(0, 5),
+    periodBills: periodBills.slice(0, 8),
+  };
+}
+
 export async function createPaidBill(
   orgId: string,
   input: {

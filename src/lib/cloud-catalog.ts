@@ -53,6 +53,36 @@ export async function listInventory(orgId: string) {
   return items.map((i) => ({ ...i, cost_history: byId.get(i.id) || [] }));
 }
 
+export type InventoryDashboard = {
+  itemCount: number;
+  lowStockCount: number;
+  stockValue: number;
+  lowStock: { id: string; name: string; stock_qty: number; unit: string }[];
+};
+
+export function summarizeInventory(
+  items: CloudInventoryItem[],
+): InventoryDashboard {
+  const lowStock = items.filter(
+    (i) => Number(i.stock_qty) <= Number(i.low_stock_threshold),
+  );
+  const stockValue = items.reduce(
+    (s, i) => s + Number(i.stock_qty) * Number(i.cost_per_unit),
+    0,
+  );
+  return {
+    itemCount: items.length,
+    lowStockCount: lowStock.length,
+    stockValue: Math.round(stockValue * 100) / 100,
+    lowStock: lowStock.slice(0, 5).map((i) => ({
+      id: i.id,
+      name: i.name,
+      stock_qty: Number(i.stock_qty),
+      unit: i.unit,
+    })),
+  };
+}
+
 export async function upsertInventory(
   orgId: string,
   input: {

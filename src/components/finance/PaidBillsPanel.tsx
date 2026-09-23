@@ -12,7 +12,13 @@ import {
 import type { PaymentMethod } from "@/lib/tenant";
 import { formatMoney } from "@/lib/utils";
 
-export function PaidBillsPanel({ orgId }: { orgId: string }) {
+export function PaidBillsPanel({
+  orgId,
+  onChanged,
+}: {
+  orgId: string;
+  onChanged?: () => void;
+}) {
   const [bills, setBills] = useState<PaidBill[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,6 +55,7 @@ export function PaidBillsPanel({ orgId }: { orgId: string }) {
       });
       (e.target as HTMLFormElement).reset();
       await reload();
+      onChanged?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save bill");
     } finally {
@@ -169,7 +176,10 @@ export function PaidBillsPanel({ orgId }: { orgId: string }) {
                 aria-label="Delete bill"
                 onClick={() =>
                   void deletePaidBill(orgId, b.id)
-                    .then(reload)
+                    .then(async () => {
+                      await reload();
+                      onChanged?.();
+                    })
                     .catch((e) =>
                       setError(e instanceof Error ? e.message : "Delete failed"),
                     )

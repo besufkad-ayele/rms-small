@@ -3,21 +3,31 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
+  AlertTriangle,
   BarChart3,
   ClipboardList,
   CreditCard,
   Package,
   ShoppingCart,
+  Wallet,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { getSpendDashboard, type SpendDashboard } from "@/lib/cloud-bills";
+import {
+  listInventory,
+  seedOrgCatalog,
+  summarizeInventory,
+  type InventoryDashboard,
+} from "@/lib/cloud-catalog";
 import { getCloudSalesSummary } from "@/lib/cloud-sales";
-import { seedOrgCatalog } from "@/lib/cloud-catalog";
 import { cn, formatMoney } from "@/lib/utils";
 
 export function HomeHub() {
   const { tenant, hasModule, daysLeft, warningLevel } = useAuth();
   const [todayRevenue, setTodayRevenue] = useState(0);
   const [todayOrders, setTodayOrders] = useState(0);
+  const [inventory, setInventory] = useState<InventoryDashboard | null>(null);
+  const [spend, setSpend] = useState<SpendDashboard | null>(null);
 
   useEffect(() => {
     if (!tenant) return;
@@ -25,6 +35,8 @@ export function HomeHub() {
       try {
         if (hasModule("inventory")) {
           await seedOrgCatalog(tenant.organization.id);
+          const items = await listInventory(tenant.organization.id);
+          setInventory(summarizeInventory(items));
         }
         if (hasModule("finance") || hasModule("inventory")) {
           const summary = await getCloudSalesSummary(
@@ -33,6 +45,9 @@ export function HomeHub() {
           );
           setTodayRevenue(summary.revenue);
           setTodayOrders(summary.orderCount);
+        }
+        if (hasModule("finance")) {
+          setSpend(await getSpendDashboard(tenant.organization.id));
         }
       } catch {
         /* ignore seed/load errors on hub */
@@ -122,6 +137,94 @@ export function HomeHub() {
           </div>
         </div>
       </section>
+
+      {(hasModule("inventory") || hasModule("finance")) &&
+      (inventory || spend) ? (
+        <section
+          className={cn(
+            "grid w-full gap-3",
+            hasModule("inventory") && hasModule("finance")
+              ? "sm:grid-cols-2"
+              : "grid-cols-1",
+          )}
+        >
+          {hasModule("inventory") && inventory ? (
+            <Link
+              href="/app/inventory"
+              className="rounded-3xl border border-ink/8 bg-white/90 p-5 shadow-sm transition hover:border-teal/30 hover:shadow-md"
+            >
+              <div className="flex items-center gap-2">
+                <span className="rounded-2xl bg-teal/10 p-2 text-teal">
+                  <Package className="h-4 w-4" />
+                </span>
+                <h3 className="font-display text-lg text-ink">
+                  Inventory dashboard
+                </h3>
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                <div>
+                  <p className="text-[11px] text-ink/50">Items</p>
+                  <p className="font-display text-xl">{inventory.itemCount}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-ink/50">Stock value</p>
+                  <p className="font-display text-xl">
+                    {formatMoney(inventory.stockValue)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-ink/50">Low stock</p>
+                  <p
+                    className={cn(
+                      "flex items-center gap-1 font-display text-xl",
+                      inventory.lowStockCount > 0 && "text-coral",
+                    )}
+                  >
+                    {inventory.lowStockCount > 0 ? (
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                    ) : null}
+                    {inventory.lowStockCount}
+                  </p>
+                </div>
+              </div>
+            </Link>
+          ) : null}
+
+          {hasModule("finance") && spend ? (
+            <Link
+              href="/app/reports"
+              className="rounded-3xl border border-ink/8 bg-white/90 p-5 shadow-sm transition hover:border-coral/30 hover:shadow-md"
+            >
+              <div className="flex items-center gap-2">
+                <span className="rounded-2xl bg-coral/10 p-2 text-coral">
+                  <Wallet className="h-4 w-4" />
+                </span>
+                <h3 className="font-display text-lg text-ink">
+                  Spend dashboard
+                </h3>
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                <div>
+                  <p className="text-[11px] text-ink/50">Today</p>
+                  <p className="font-display text-xl">
+                    {formatMoney(spend.todaySpent)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-ink/50">This month</p>
+                  <p className="font-display text-xl">
+                    {formatMoney(spend.monthSpent)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-ink/50">Bills</p>
+                  <p className="font-display text-xl">{spend.billCount}</p>
+                </div>
+              </div>
+            </Link>
+          ) : null}
+        </section>
+      ) : null}
 
       {hasModule("inventory") ? (
         <Link
