@@ -90,18 +90,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [tenant, setTenant] = useState<TenantContext | null>(null);
 
   const refresh = useCallback(async () => {
-    const u = await getUser();
-    setUser(u);
-    if (!u) {
+    try {
+      const u = await getUser();
+      setUser(u);
+      if (!u) {
+        setProfile(null);
+        setTenant(null);
+        setReady(true);
+        return;
+      }
+      const [p, t] = await Promise.all([loadProfile(), loadTenant()]);
+      setProfile(p);
+      setTenant(t);
+    } catch (err) {
+      console.error("Auth refresh failed", err);
       setProfile(null);
       setTenant(null);
+    } finally {
       setReady(true);
-      return;
     }
-    const [p, t] = await Promise.all([loadProfile(), loadTenant()]);
-    setProfile(p);
-    setTenant(t);
-    setReady(true);
   }, []);
 
   useEffect(() => {
