@@ -112,14 +112,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void refresh();
-    const supabase = createClient();
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      void refresh();
-    });
-    return () => subscription.unsubscribe();
+    let cancelled = false;
+    void (async () => {
+      try {
+        await refresh();
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) setReady(true);
+      }
+    })();
+
+    let unsubscribe = () => {};
+    try {
+      const supabase = createClient();
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange(() => {
+        void refresh();
+      });
+      unsubscribe = () => subscription.unsubscribe();
+    } catch (err) {
+      console.error("Supabase client init failed", err);
+      setReady(true);
+    }
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [refresh]);
 
   const login = useCallback(

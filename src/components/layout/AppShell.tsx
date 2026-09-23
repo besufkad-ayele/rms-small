@@ -13,10 +13,24 @@ import {
   ShoppingCart,
   X,
 } from "lucide-react";
-import { useOffline } from "next/offline";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { cn } from "@/lib/utils";
+
+function useIsOffline() {
+  const [offline, setOffline] = useState(false);
+  useEffect(() => {
+    const sync = () => setOffline(!navigator.onLine);
+    sync();
+    window.addEventListener("online", sync);
+    window.addEventListener("offline", sync);
+    return () => {
+      window.removeEventListener("online", sync);
+      window.removeEventListener("offline", sync);
+    };
+  }, []);
+  return offline;
+}
 
 export function AppShell({
   children,
@@ -28,7 +42,7 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const { tenant, logout, hasModule, daysLeft, warningLevel, accessBlocked, isPlatformAdmin } = useAuth();
-  const isOffline = useOffline();
+  const isOffline = useIsOffline();
   const [open, setOpen] = useState(false);
 
   const nav = [

@@ -1,9 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  experimental: {
-    useOffline: true,
-  },
+  // useOffline disabled — it was triggering Next.js global-error
+  // ("This page couldn't load") on client navigations in this app.
 };
 
 export default nextConfig;
