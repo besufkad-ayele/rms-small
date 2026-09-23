@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #0b1d1a;
+  --stone: #eef2f0;
+  --teal: #2a9d8f;
+  --gold: #e9c46a;
+  --coral: #e76f51;
+  --paper: #ffffff;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-stone: var(--stone);
+  --color-teal: var(--teal);
+  --color-gold: var(--gold);
+  --color-coral: var(--coral);
+  --color-paper: var(--paper);
+  --color-background: var(--stone);
+  --color-foreground: var(--ink);
+  --font-sans: var(--font-dm-sans);
+  --font-display: var(--font-fraunces);
+}
+
+body {
+  background: var(--stone);
+  color: var(--ink);
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-fraunces), Georgia, serif;
+}
+
+.field {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid color-mix(in oklab, var(--ink) 12%, transparent);
+  background: white;
+  padding: 0.625rem 0.75rem;
+  outline: none;
+}
+
+.field:focus {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--teal) 45%, transparent);
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .thermal-receipt,
+  .thermal-receipt * {
+    visibility: visible;
+  }
+
+  .thermal-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    border: none !important;
+    box-shadow: none !important;
+    margin: 0;
+    padding: 4mm;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}
