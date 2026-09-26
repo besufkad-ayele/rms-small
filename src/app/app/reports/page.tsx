@@ -5,7 +5,7 @@ import { FinanceDashboardPanel } from "@/components/finance/FinanceDashboardPane
 
 export default function ReportsPage() {
   return (
-    <RequireAuth title="Finance" module="finance">
+    <RequireAuth title="Finance" module="finance" feature="finance">
       <FinanceDashboardPanel />
     </RequireAuth>
   );

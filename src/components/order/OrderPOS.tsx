@@ -3,15 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Minus, Plus, Printer, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
+import { type CloudMenuItem } from "@/lib/cloud-catalog";
+import { type CloudSaleOrder } from "@/lib/cloud-sales";
 import {
-  listMenu,
-  seedOrgCatalog,
-  type CloudMenuItem,
-} from "@/lib/cloud-catalog";
-import {
-  completeCloudSale,
-  type CloudSaleOrder,
-} from "@/lib/cloud-sales";
+  completeSaleResilient,
+  loadMenuResilient,
+} from "@/lib/offline/resilient";
 import type { MenuCategory, PaymentMethod } from "@/lib/tenant";
 import { MENU_CATEGORIES } from "@/lib/menu-categories";
 import { cn, formatMoney } from "@/lib/utils";
@@ -21,6 +19,7 @@ type CartLine = { menuItem: CloudMenuItem; quantity: number };
 
 export function OrderPOS() {
   const { tenant } = useAuth();
+  const { refreshPendingCount } = useOfflineSync();
   const orgId = tenant!.organization.id;
   const [menu, setMenu] = useState<CloudMenuItem[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -29,11 +28,11 @@ export function OrderPOS() {
   const [paymentReference, setPaymentReference] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [queuedNote, setQueuedNote] = useState<string | null>(null);
   const [lastSale, setLastSale] = useState<CloudSaleOrder | null>(null);
 
   const reload = useCallback(async () => {
-    await seedOrgCatalog(orgId);
-    setMenu(await listMenu(orgId));
+    setMenu(await loadMenuResilient(orgId, setMenu));
   }, [orgId]);
 
   useEffect(() => {
@@ -78,8 +77,9 @@ export function OrderPOS() {
     if (!tenant || cart.length === 0) return;
     setBusy(true);
     setError(null);
+    setQueuedNote(null);
     try {
-      const order = await completeCloudSale({
+      const { order, offlineQueued } = await completeSaleResilient({
         orgId,
         lines: cart,
         paymentMethod,
@@ -89,6 +89,12 @@ export function OrderPOS() {
       setLastSale(order);
       setCart([]);
       setPaymentReference("");
+      if (offlineQueued) {
+        setQueuedNote(
+          "Saved on this device. Will sync when the connection is fast enough.",
+        );
+        await refreshPendingCount();
+      }
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Sale failed");
@@ -110,16 +116,28 @@ export function OrderPOS() {
         businessName={tenant.organization.name}
         phone={tenant.organization.phone}
         address={tenant.organization.address}
-        onDone={() => setLastSale(null)}
+        onDone={() => {
+          setLastSale(null);
+          setQueuedNote(null);
+        }}
       />
     );
   }
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+      {queuedNote ? (
+        <p className="col-span-full rounded-2xl border border-gold/40 bg-gold/15 px-4 py-3 text-sm text-ink">
+          {queuedNote}
+        </p>
+      ) : null}
       <section className="rounded-3xl border border-ink/8 bg-white/80 p-3 sm:p-5">
         <div className="mb-4 flex flex-wrap gap-2">
-          <Chip active={category === "all"} onClick={() => setCategory("all")} label="All" />
+          <Chip
+            active={category === "all"}
+            onClick={() => setCategory("all")}
+            label="All"
+          />
           {MENU_CATEGORIES.map((c) => (
             <Chip
               key={c.id}
@@ -144,7 +162,9 @@ export function OrderPOS() {
                 </p>
               ) : null}
               <p className="mt-1 text-sm text-teal">{formatMoney(item.price)}</p>
-              <p className="mt-2 text-[11px] text-ink/45">{item.vote_count} sold</p>
+              <p className="mt-2 text-[11px] text-ink/45">
+                {item.vote_count} sold
+              </p>
             </button>
           ))}
           {filtered.length === 0 ? (
@@ -164,20 +184,38 @@ export function OrderPOS() {
               className="flex items-center gap-2 rounded-2xl bg-white/5 px-3 py-2"
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{line.menuItem.name}</p>
+                <p className="truncate text-sm font-medium">
+                  {line.menuItem.name}
+                </p>
                 <p className="text-xs text-stone/60">
                   {formatMoney(line.menuItem.price)}
                 </p>
               </div>
               <div className="flex items-center gap-1">
-                <button type="button" className="rounded-lg bg-white/10 p-1" onClick={() => setQty(line.menuItem.id, line.quantity - 1)}>
+                <button
+                  type="button"
+                  className="rounded-lg bg-white/10 p-1"
+                  onClick={() =>
+                    setQty(line.menuItem.id, line.quantity - 1)
+                  }
+                >
                   <Minus className="h-3.5 w-3.5" />
                 </button>
                 <span className="w-6 text-center text-sm">{line.quantity}</span>
-                <button type="button" className="rounded-lg bg-white/10 p-1" onClick={() => setQty(line.menuItem.id, line.quantity + 1)}>
+                <button
+                  type="button"
+                  className="rounded-lg bg-white/10 p-1"
+                  onClick={() =>
+                    setQty(line.menuItem.id, line.quantity + 1)
+                  }
+                >
                   <Plus className="h-3.5 w-3.5" />
                 </button>
-                <button type="button" className="ml-1 rounded-lg p-1 text-coral" onClick={() => setQty(line.menuItem.id, 0)}>
+                <button
+                  type="button"
+                  className="ml-1 rounded-lg p-1 text-coral"
+                  onClick={() => setQty(line.menuItem.id, 0)}
+                >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
@@ -197,7 +235,9 @@ export function OrderPOS() {
           </div>
           <select
             value={paymentMethod}
-            onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
+            onChange={(e) =>
+              setPaymentMethod(e.target.value as PaymentMethod)
+            }
             className="w-full rounded-xl border border-white/15 bg-ink px-3 py-2.5 text-sm outline-none"
           >
             <option value="cash">Cash</option>
@@ -214,7 +254,9 @@ export function OrderPOS() {
             />
           ) : null}
           {error ? (
-            <p className="rounded-xl bg-coral/20 px-3 py-2 text-sm text-coral">{error}</p>
+            <p className="rounded-xl bg-coral/20 px-3 py-2 text-sm text-coral">
+              {error}
+            </p>
           ) : null}
           <button
             type="button"

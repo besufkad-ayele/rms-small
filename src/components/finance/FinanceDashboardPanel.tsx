@@ -22,8 +22,9 @@ import {
 } from "@/lib/cloud-bills";
 import {
   listCloudDayCloses,
-  saveCloudDayClose,
 } from "@/lib/cloud-sales";
+import { saveDayCloseResilient } from "@/lib/offline/resilient";
+import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import { PaidBillsPanel } from "@/components/finance/PaidBillsPanel";
 import type { ReportPeriod } from "@/lib/types";
 import { cn, dayKey, formatDateTime, formatMoney } from "@/lib/utils";
@@ -47,6 +48,7 @@ const TABS: { id: MainTab; label: string; icon: typeof LayoutDashboard }[] = [
 
 export function FinanceDashboardPanel() {
   const { tenant } = useAuth();
+  const { refreshPendingCount } = useOfflineSync();
   const orgId = tenant!.organization.id;
   const [tab, setTab] = useState<MainTab>("overall");
   const [period, setPeriod] = useState<ReportPeriod>("today");
@@ -203,7 +205,7 @@ export function FinanceDashboardPanel() {
           : (dash?.byOrder
               .filter((o) => o.dayKey === dayKey())
               .reduce((s, o) => s + o.total, 0) ?? 0);
-      await saveCloudDayClose({
+      const { offlineQueued } = await saveDayCloseResilient({
         orgId,
         dayKey: dayKey(),
         expectedSalesTotal: todayExpected,
@@ -215,6 +217,7 @@ export function FinanceDashboardPanel() {
       setDeclared("");
       setNote("");
       setProofs([]);
+      if (offlineQueued) await refreshPendingCount();
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Close failed");

@@ -3,20 +3,23 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import {
-  deleteMenu,
-  listInventory,
-  listMenu,
-  upsertMenu,
   type CloudInventoryItem,
   type CloudMenuItem,
 } from "@/lib/cloud-catalog";
+import {
+  deleteMenuResilient,
+  loadCatalogResilient,
+  upsertMenuResilient,
+} from "@/lib/offline/resilient";
 import { MENU_CATEGORIES, categoryLabel } from "@/lib/menu-categories";
 import type { MenuCategory } from "@/lib/tenant";
 import { cn, formatMoney } from "@/lib/utils";
 
 export function MenuManager() {
   const { tenant } = useAuth();
+  const { refreshPendingCount } = useOfflineSync();
   const orgId = tenant!.organization.id;
   const [menu, setMenu] = useState<CloudMenuItem[]>([]);
   const [inventory, setInventory] = useState<CloudInventoryItem[]>([]);
@@ -35,7 +38,13 @@ export function MenuManager() {
   const [message, setMessage] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
-    const [m, i] = await Promise.all([listMenu(orgId), listInventory(orgId)]);
+    const { menu: m, inventory: i } = await loadCatalogResilient(
+      orgId,
+      ({ menu, inventory }) => {
+        setMenu(menu);
+        setInventory(inventory);
+      },
+    );
     setMenu(m);
     setInventory(i);
   }, [orgId]);
@@ -71,7 +80,7 @@ export function MenuManager() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    await upsertMenu(orgId, {
+    const { offlineQueued } = await upsertMenuResilient(orgId, {
       id: editing?.id,
       name,
       category,
@@ -80,8 +89,17 @@ export function MenuManager() {
       description,
       recipe,
     });
-    setMessage(editing ? "Updated" : "Added");
+    setMessage(
+      offlineQueued
+        ? editing
+          ? "Saved offline — will sync"
+          : "Added offline — will sync"
+        : editing
+          ? "Updated"
+          : "Added",
+    );
     reset();
+    if (offlineQueued) await refreshPendingCount();
     await reload();
   }
 
@@ -295,7 +313,12 @@ export function MenuManager() {
                 <button
                   type="button"
                   className="rounded-lg border border-coral/20 bg-coral/10 p-2 text-coral"
-                  onClick={() => void deleteMenu(orgId, item.id).then(reload)}
+                  onClick={() =>
+                    void deleteMenuResilient(orgId, item.id).then(async (r) => {
+                      if (r.offlineQueued) await refreshPendingCount();
+                      await reload();
+                    })
+                  }
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>

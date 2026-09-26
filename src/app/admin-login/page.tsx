@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Eye, EyeOff } from "lucide-react";
 import { adminLoginAction } from "@/app/apply/actions";
 import { useAuth } from "@/components/auth/AuthProvider";
 
@@ -10,6 +11,7 @@ export default function AdminLoginPage() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     if (ready && isPlatformAdmin) router.replace("/platform");
@@ -59,13 +61,27 @@ export default function AdminLoginPage() {
           </label>
           <label className="block text-sm">
             <span className="mb-1 block text-stone/70">Password</span>
-            <input
-              name="password"
-              type="password"
-              required
-              autoComplete="current-password"
-              className="w-full rounded-xl border border-white/15 bg-ink/40 px-3 py-3 outline-none focus:ring-2 focus:ring-gold/40"
-            />
+            <div className="relative">
+              <input
+                name="password"
+                type={showPassword ? "text" : "password"}
+                required
+                autoComplete="current-password"
+                className="w-full rounded-xl border border-white/15 bg-ink/40 px-3 py-3 pr-11 outline-none focus:ring-2 focus:ring-gold/40"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-stone/55 hover:text-stone"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
           </label>
           <button
             type="submit"

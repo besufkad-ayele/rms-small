@@ -4,11 +4,14 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import {
   BILL_CATEGORIES,
-  createPaidBill,
-  deletePaidBill,
-  listPaidBills,
   type PaidBill,
 } from "@/lib/cloud-bills";
+import {
+  createPaidBillResilient,
+  deletePaidBillResilient,
+  loadPaidBillsResilient,
+} from "@/lib/offline/resilient";
+import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import type { PaymentMethod } from "@/lib/tenant";
 import { formatMoney } from "@/lib/utils";
 
@@ -19,12 +22,13 @@ export function PaidBillsPanel({
   orgId: string;
   onChanged?: () => void;
 }) {
+  const { refreshPendingCount } = useOfflineSync();
   const [bills, setBills] = useState<PaidBill[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async () => {
-    setBills(await listPaidBills(orgId));
+    setBills(await loadPaidBillsResilient(orgId));
   }, [orgId]);
 
   useEffect(() => {
@@ -44,7 +48,7 @@ export function PaidBillsPanel({
     setError(null);
     const fd = new FormData(e.currentTarget);
     try {
-      await createPaidBill(orgId, {
+      const { offlineQueued } = await createPaidBillResilient(orgId, {
         title: String(fd.get("title") ?? ""),
         category: String(fd.get("category") ?? "other"),
         amount: Number(fd.get("amount") || 0),
@@ -54,6 +58,7 @@ export function PaidBillsPanel({
         note: String(fd.get("note") ?? ""),
       });
       (e.target as HTMLFormElement).reset();
+      if (offlineQueued) await refreshPendingCount();
       await reload();
       onChanged?.();
     } catch (err) {
@@ -175,8 +180,9 @@ export function PaidBillsPanel({
                 className="rounded-lg border border-coral/20 bg-coral/10 p-2 text-coral"
                 aria-label="Delete bill"
                 onClick={() =>
-                  void deletePaidBill(orgId, b.id)
-                    .then(async () => {
+                  void deletePaidBillResilient(orgId, b.id)
+                    .then(async (r) => {
+                      if (r.offlineQueued) await refreshPendingCount();
                       await reload();
                       onChanged?.();
                     })

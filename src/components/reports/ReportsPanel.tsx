@@ -6,8 +6,9 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import {
   getCloudSalesSummary,
   listCloudDayCloses,
-  saveCloudDayClose,
 } from "@/lib/cloud-sales";
+import { saveDayCloseResilient } from "@/lib/offline/resilient";
+import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import type { ReportPeriod } from "@/lib/types";
 import { cn, dayKey, formatMoney } from "@/lib/utils";
 
@@ -21,6 +22,7 @@ const PERIODS: { id: ReportPeriod; label: string }[] = [
 
 export function ReportsPanel() {
   const { tenant } = useAuth();
+  const { refreshPendingCount } = useOfflineSync();
   const orgId = tenant!.organization.id;
   const [period, setPeriod] = useState<ReportPeriod>("today");
   const [summary, setSummary] = useState<Awaited<
@@ -77,7 +79,7 @@ export function ReportsPanel() {
     setBusy(true);
     setError(null);
     try {
-      await saveCloudDayClose({
+      const { offlineQueued } = await saveDayCloseResilient({
         orgId,
         dayKey: dayKey(),
         expectedSalesTotal: expected,
@@ -89,6 +91,7 @@ export function ReportsPanel() {
       setDeclared("");
       setNote("");
       setProofs([]);
+      if (offlineQueued) await refreshPendingCount();
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Close failed");

@@ -34,6 +34,7 @@ import {
   type Profile,
   type TenantContext,
 } from "@/lib/tenant";
+import { hasFeature as checkFeature, type StaffFeature } from "@/lib/permissions";
 
 interface AuthState {
   ready: boolean;
@@ -48,6 +49,7 @@ interface AuthState {
   daysLeft: number;
   warningLevel: AccessWarningLevel;
   hasModule: (module: AppModule) => boolean;
+  hasFeature: (feature: StaffFeature) => boolean;
   refresh: () => Promise<void>;
   login: (email: string, password: string) => Promise<string | null>;
   register: (input: {
@@ -251,7 +253,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const hasModule = useCallback(
     (module: AppModule) => {
       if (!tenant) return false;
-      return moduleEnabled(tenant.subscription, module, tenant.organization);
+      if (!moduleEnabled(tenant.subscription, module, tenant.organization)) {
+        return false;
+      }
+      // Module on + staff permission for related features
+      if (module === "inventory") {
+        return (
+          checkFeature(tenant.membership, "order") ||
+          checkFeature(tenant.membership, "menu") ||
+          checkFeature(tenant.membership, "inventory")
+        );
+      }
+      return checkFeature(tenant.membership, "finance");
+    },
+    [tenant],
+  );
+
+  const hasFeature = useCallback(
+    (feature: StaffFeature) => {
+      if (!tenant) return false;
+      if (!checkFeature(tenant.membership, feature)) return false;
+      if (feature === "order" || feature === "menu" || feature === "inventory") {
+        return moduleEnabled(
+          tenant.subscription,
+          "inventory",
+          tenant.organization,
+        );
+      }
+      if (feature === "finance") {
+        return moduleEnabled(
+          tenant.subscription,
+          "finance",
+          tenant.organization,
+        );
+      }
+      // billing + staff: always available to permitted roles (billing even when blocked)
+      return true;
     },
     [tenant],
   );
@@ -270,6 +307,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       daysLeft,
       warningLevel,
       hasModule,
+      hasFeature,
       refresh,
       login,
       register,
@@ -291,6 +329,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       daysLeft,
       warningLevel,
       hasModule,
+      hasFeature,
       refresh,
       login,
       register,

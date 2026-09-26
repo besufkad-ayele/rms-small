@@ -4,16 +4,20 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, History, Package, Pencil, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import {
-  deleteInventory,
-  listInventory,
   summarizeInventory,
-  upsertInventory,
   type CloudInventoryItem,
 } from "@/lib/cloud-catalog";
+import {
+  deleteInventoryResilient,
+  loadInventoryResilient,
+  upsertInventoryResilient,
+} from "@/lib/offline/resilient";
+import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import { cn, formatMoney } from "@/lib/utils";
 
 export function InventoryManager() {
   const { tenant } = useAuth();
+  const { refreshPendingCount } = useOfflineSync();
   const orgId = tenant!.organization.id;
   const [items, setItems] = useState<CloudInventoryItem[]>([]);
   const [editing, setEditing] = useState<CloudInventoryItem | null>(null);
@@ -27,7 +31,7 @@ export function InventoryManager() {
   const [historyFor, setHistoryFor] = useState<CloudInventoryItem | null>(null);
 
   const reload = useCallback(async () => {
-    setItems(await listInventory(orgId));
+    setItems(await loadInventoryResilient(orgId, setItems));
   }, [orgId]);
 
   useEffect(() => {
@@ -49,7 +53,10 @@ export function InventoryManager() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    await upsertInventory(orgId, { id: editing?.id, ...form });
+    const { offlineQueued } = await upsertInventoryResilient(orgId, {
+      id: editing?.id,
+      ...form,
+    });
     setEditing(null);
     setForm({
       name: "",
@@ -58,6 +65,7 @@ export function InventoryManager() {
       low_stock_threshold: 1,
       cost_per_unit: 0,
     });
+    if (offlineQueued) await refreshPendingCount();
     await reload();
   }
 
@@ -235,7 +243,11 @@ export function InventoryManager() {
                       type="button"
                       className="rounded-lg border border-coral/20 bg-coral/10 p-2 text-coral"
                       onClick={() =>
-                        void deleteInventory(orgId, item.id).then(reload)
+                        void deleteInventoryResilient(orgId, item.id)
+                          .then(async (r) => {
+                            if (r.offlineQueued) await refreshPendingCount();
+                            await reload();
+                          })
                       }
                     >
                       <Trash2 className="h-4 w-4" />

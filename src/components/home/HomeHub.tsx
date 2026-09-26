@@ -9,21 +9,22 @@ import {
   CreditCard,
   Package,
   ShoppingCart,
+  Users,
   Wallet,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { getSpendDashboard, type SpendDashboard } from "@/lib/cloud-bills";
 import {
-  listInventory,
   seedOrgCatalog,
   summarizeInventory,
   type InventoryDashboard,
 } from "@/lib/cloud-catalog";
 import { getCloudSalesSummary } from "@/lib/cloud-sales";
+import { loadInventoryResilient } from "@/lib/offline/resilient";
 import { cn, formatMoney } from "@/lib/utils";
 
 export function HomeHub() {
-  const { tenant, hasModule, daysLeft, warningLevel } = useAuth();
+  const { tenant, hasFeature, daysLeft, warningLevel } = useAuth();
   const [todayRevenue, setTodayRevenue] = useState(0);
   const [todayOrders, setTodayOrders] = useState(0);
   const [inventory, setInventory] = useState<InventoryDashboard | null>(null);
@@ -33,12 +34,14 @@ export function HomeHub() {
     if (!tenant) return;
     void (async () => {
       try {
-        if (hasModule("inventory")) {
+        if (hasFeature("inventory") || hasFeature("menu") || hasFeature("order")) {
           await seedOrgCatalog(tenant.organization.id);
-          const items = await listInventory(tenant.organization.id);
+        }
+        if (hasFeature("inventory")) {
+          const items = await loadInventoryResilient(tenant.organization.id);
           setInventory(summarizeInventory(items));
         }
-        if (hasModule("finance") || hasModule("inventory")) {
+        if (hasFeature("finance") || hasFeature("order")) {
           const summary = await getCloudSalesSummary(
             tenant.organization.id,
             "today",
@@ -46,19 +49,19 @@ export function HomeHub() {
           setTodayRevenue(summary.revenue);
           setTodayOrders(summary.orderCount);
         }
-        if (hasModule("finance")) {
+        if (hasFeature("finance")) {
           setSpend(await getSpendDashboard(tenant.organization.id));
         }
       } catch {
         /* ignore seed/load errors on hub */
       }
     })();
-  }, [tenant, hasModule]);
+  }, [tenant, hasFeature]);
 
   if (!tenant) return null;
 
   const modules = [
-    ...(hasModule("inventory")
+    ...(hasFeature("menu")
       ? [
           {
             href: "/app/menu",
@@ -66,6 +69,10 @@ export function HomeHub() {
             blurb: "Prices, recipes & popularity",
             icon: ClipboardList,
           },
+        ]
+      : []),
+    ...(hasFeature("inventory")
+      ? [
           {
             href: "/app/inventory",
             title: "Inventory",
@@ -74,7 +81,7 @@ export function HomeHub() {
           },
         ]
       : []),
-    ...(hasModule("finance")
+    ...(hasFeature("finance")
       ? [
           {
             href: "/app/reports",
@@ -84,12 +91,26 @@ export function HomeHub() {
           },
         ]
       : []),
-    {
-      href: "/app/billing",
-      title: "Billing",
-      blurb: "Trial, modules & payments",
-      icon: CreditCard,
-    },
+    ...(hasFeature("billing")
+      ? [
+          {
+            href: "/app/billing",
+            title: "Billing",
+            blurb: "Trial, modules & payments",
+            icon: CreditCard,
+          },
+        ]
+      : []),
+    ...(hasFeature("staff")
+      ? [
+          {
+            href: "/app/staff",
+            title: "Staff",
+            blurb: "Logins & feature access",
+            icon: Users,
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -138,17 +159,17 @@ export function HomeHub() {
         </div>
       </section>
 
-      {(hasModule("inventory") || hasModule("finance")) &&
+      {(hasFeature("inventory") || hasFeature("finance")) &&
       (inventory || spend) ? (
         <section
           className={cn(
             "grid w-full gap-3",
-            hasModule("inventory") && hasModule("finance")
+            hasFeature("inventory") && hasFeature("finance")
               ? "sm:grid-cols-2"
               : "grid-cols-1",
           )}
         >
-          {hasModule("inventory") && inventory ? (
+          {hasFeature("inventory") && inventory ? (
             <Link
               href="/app/inventory"
               className="rounded-3xl border border-ink/8 bg-white/90 p-5 shadow-sm transition hover:border-teal/30 hover:shadow-md"
@@ -190,7 +211,7 @@ export function HomeHub() {
             </Link>
           ) : null}
 
-          {hasModule("finance") && spend ? (
+          {hasFeature("finance") && spend ? (
             <Link
               href="/app/reports"
               className="rounded-3xl border border-ink/8 bg-white/90 p-5 shadow-sm transition hover:border-coral/30 hover:shadow-md"
@@ -226,7 +247,7 @@ export function HomeHub() {
         </section>
       ) : null}
 
-      {hasModule("inventory") ? (
+      {hasFeature("order") ? (
         <Link
           href="/app/order"
           className="flex w-full items-start gap-4 rounded-3xl bg-gradient-to-br from-teal to-teal/80 p-5 text-white shadow-lg shadow-teal/25 transition hover:brightness-105 sm:p-6"

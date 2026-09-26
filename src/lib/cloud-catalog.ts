@@ -22,16 +22,26 @@ export interface CloudMenuItem {
   available: boolean;
   description: string;
   vote_count: number;
+  updated_at?: string;
   recipe?: { inventory_item_id: string; quantity_required: number }[];
 }
 
 export async function listInventory(orgId: string) {
+  return listInventoryChangedSince(orgId, null);
+}
+
+export async function listInventoryChangedSince(
+  orgId: string,
+  sinceIso: string | null,
+) {
   const supabase = createClient();
-  const { data, error } = await supabase
+  let q = supabase
     .from("inventory_items")
     .select("*")
     .eq("organization_id", orgId)
     .order("name");
+  if (sinceIso) q = q.gt("updated_at", sinceIso);
+  const { data, error } = await q;
   if (error) throw new Error(error.message);
 
   const items = (data || []) as CloudInventoryItem[];
@@ -128,12 +138,22 @@ export async function deleteInventory(orgId: string, id: string) {
 }
 
 export async function listMenu(orgId: string) {
+  return listMenuChangedSince(orgId, null);
+}
+
+/** Full menu, or only rows with updated_at newer than `sinceIso`. */
+export async function listMenuChangedSince(
+  orgId: string,
+  sinceIso: string | null,
+) {
   const supabase = createClient();
-  const { data, error } = await supabase
+  let q = supabase
     .from("menu_items")
     .select("*, menu_recipes(inventory_item_id, quantity_required)")
     .eq("organization_id", orgId)
     .order("vote_count", { ascending: false });
+  if (sinceIso) q = q.gt("updated_at", sinceIso);
+  const { data, error } = await q;
   if (error) throw new Error(error.message);
   return (data || []).map((row) => {
     const r = row as CloudMenuItem & {

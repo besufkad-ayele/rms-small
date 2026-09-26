@@ -71,7 +71,7 @@ export default function HomePage() {
           </p>
         </div>
 
-        <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:justify-center">
+        <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Link
             href="/login"
             className="rounded-xl bg-teal px-6 py-3.5 text-center text-sm font-semibold text-white shadow-lg shadow-teal/25"
@@ -79,8 +79,14 @@ export default function HomePage() {
             Sign in
           </Link>
           <Link
-            href="/signup"
+            href="/staff-login"
             className="rounded-xl border border-white/20 bg-white/5 px-6 py-3.5 text-center text-sm font-semibold text-stone backdrop-blur"
+          >
+            Staff sign in
+          </Link>
+          <Link
+            href="/signup"
+            className="rounded-xl border border-white/20 bg-white/5 px-6 py-3.5 text-center text-sm font-semibold text-stone backdrop-blur sm:col-span-2"
           >
             Create account
           </Link>

@@ -5,16 +5,20 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { AppShell } from "@/components/layout/AppShell";
 import type { AppModule } from "@/lib/tenant";
+import type { StaffFeature } from "@/lib/permissions";
 
 export function RequireAuth({
   children,
   title,
   module,
+  feature,
   allowWhenBlocked,
 }: {
   children: React.ReactNode;
   title?: string;
   module?: AppModule;
+  /** Granular staff feature (order, menu, inventory, finance, billing, staff) */
+  feature?: StaffFeature;
   allowWhenBlocked?: boolean;
 }) {
   const {
@@ -25,6 +29,7 @@ export function RequireAuth({
     awaitingVerification,
     accessBlocked,
     hasModule,
+    hasFeature,
     isPlatformAdmin,
   } = useAuth();
   const router = useRouter();
@@ -48,10 +53,16 @@ export function RequireAuth({
       return;
     }
     if (accessBlocked && !allowWhenBlocked && !awaitingVerification) {
-      router.replace("/app/billing");
+      if (hasFeature("billing")) {
+        router.replace("/app/billing");
+      }
       return;
     }
     if (module && tenant && !hasModule(module) && !accessBlocked) {
+      router.replace("/app");
+      return;
+    }
+    if (feature && tenant && !hasFeature(feature) && !accessBlocked) {
       router.replace("/app");
     }
   }, [
@@ -62,8 +73,10 @@ export function RequireAuth({
     accessBlocked,
     allowWhenBlocked,
     module,
+    feature,
     tenant,
     hasModule,
+    hasFeature,
     isPlatformAdmin,
     router,
   ]);
@@ -85,6 +98,17 @@ export function RequireAuth({
   }
 
   if (accessBlocked && !allowWhenBlocked) {
+    if (!hasFeature("billing")) {
+      return (
+        <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-stone px-4 text-center text-ink">
+          <p className="font-display text-xl">Access paused</p>
+          <p className="max-w-sm text-sm text-ink/60">
+            Your restaurant subscription needs renewal. Ask the owner to update
+            billing — you can’t open other areas until then.
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="flex min-h-dvh items-center justify-center bg-stone text-ink">
         <p className="text-sm text-ink/60">Redirecting to billing…</p>
@@ -96,6 +120,14 @@ export function RequireAuth({
     return (
       <div className="flex min-h-dvh items-center justify-center bg-stone text-ink">
         <p className="text-sm text-ink/60">Module not enabled…</p>
+      </div>
+    );
+  }
+
+  if (feature && !hasFeature(feature) && !accessBlocked) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-stone text-ink">
+        <p className="text-sm text-ink/60">You don’t have access to this area…</p>
       </div>
     );
   }

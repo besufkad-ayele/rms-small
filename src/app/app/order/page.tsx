@@ -5,7 +5,7 @@ import { OrderPOS } from "@/components/order/OrderPOS";
 
 export default function OrderPage() {
   return (
-    <RequireAuth title="Order" module="inventory">
+    <RequireAuth title="Order" module="inventory" feature="order">
       <OrderPOS />
     </RequireAuth>
   );

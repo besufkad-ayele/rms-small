@@ -61,6 +61,14 @@ export interface Membership {
   organization_id: string;
   user_id: string;
   role: MemberRole;
+  can_order?: boolean;
+  can_menu?: boolean;
+  can_inventory?: boolean;
+  can_finance?: boolean;
+  can_billing?: boolean;
+  can_manage_staff?: boolean;
+  active?: boolean;
+  invited_by?: string | null;
 }
 
 export interface Subscription {
@@ -73,6 +81,8 @@ export interface Subscription {
   current_period_end: string | null;
   plan_code: string;
   notes?: string | null;
+  /** Non-owner staff seats included in the package */
+  max_staff_seats?: number;
 }
 
 export interface TenantContext {

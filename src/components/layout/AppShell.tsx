@@ -11,26 +11,15 @@ import {
   Menu,
   Package,
   ShoppingCart,
+  Users,
   X,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { InstallAppButton } from "@/components/offline/InstallAppButton";
+import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
+import { SyncControls, SyncSuccessDialog } from "@/components/offline/SyncUI";
 import { cn } from "@/lib/utils";
-
-function useIsOffline() {
-  const [offline, setOffline] = useState(false);
-  useEffect(() => {
-    const sync = () => setOffline(!navigator.onLine);
-    sync();
-    window.addEventListener("online", sync);
-    window.addEventListener("offline", sync);
-    return () => {
-      window.removeEventListener("online", sync);
-      window.removeEventListener("offline", sync);
-    };
-  }, []);
-  return offline;
-}
 
 export function AppShell({
   children,
@@ -44,28 +33,36 @@ export function AppShell({
   const {
     tenant,
     logout,
-    hasModule,
+    hasFeature,
     daysLeft,
     warningLevel,
     accessBlocked,
     isPlatformAdmin,
   } = useAuth();
-  const isOffline = useIsOffline();
+  const { connection, pendingCount } = useOfflineSync();
+  const isOffline = connection.status === "down";
   const [open, setOpen] = useState(false);
 
   const nav = [
     { href: "/app", label: "Home", icon: LayoutGrid, exact: true },
-    ...(hasModule("inventory")
-      ? [
-          { href: "/app/order", label: "Order", icon: ShoppingCart },
-          { href: "/app/menu", label: "Menu", icon: ClipboardList },
-          { href: "/app/inventory", label: "Inventory", icon: Package },
-        ]
+    ...(hasFeature("order")
+      ? [{ href: "/app/order", label: "Order", icon: ShoppingCart }]
       : []),
-    ...(hasModule("finance")
+    ...(hasFeature("menu")
+      ? [{ href: "/app/menu", label: "Menu", icon: ClipboardList }]
+      : []),
+    ...(hasFeature("inventory")
+      ? [{ href: "/app/inventory", label: "Inventory", icon: Package }]
+      : []),
+    ...(hasFeature("finance")
       ? [{ href: "/app/reports", label: "Finance", icon: BarChart3 }]
       : []),
-    { href: "/app/billing", label: "Billing", icon: CreditCard },
+    ...(hasFeature("billing")
+      ? [{ href: "/app/billing", label: "Billing", icon: CreditCard }]
+      : []),
+    ...(hasFeature("staff")
+      ? [{ href: "/app/staff", label: "Staff", icon: Users }]
+      : []),
     ...(isPlatformAdmin
       ? [{ href: "/platform", label: "Platform", icon: LayoutGrid }]
       : []),
@@ -135,7 +132,14 @@ export function AppShell({
             })}
           </nav>
 
-          <div className="mt-auto border-t border-white/10 pt-4">
+          <div className="mt-auto space-y-3 border-t border-white/10 pt-4">
+            <div className="rounded-2xl bg-white/5 p-3">
+              <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-stone/50">
+                Connection & sync
+              </p>
+              <SyncControls tone="dark" />
+            </div>
+            <InstallAppButton />
             <p className="truncate text-sm font-medium">
               {tenant?.profile.full_name}
             </p>
@@ -145,7 +149,7 @@ export function AppShell({
             <button
               type="button"
               onClick={() => void handleLogout()}
-              className="mt-3 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-stone/80 hover:bg-white/5"
+              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-stone/80 hover:bg-white/5"
             >
               <LogOut className="h-4 w-4" />
               Sign out
@@ -164,9 +168,17 @@ export function AppShell({
       ) : null}
 
       <div className="flex min-h-dvh min-w-0 flex-col lg:pl-64">
+        <SyncSuccessDialog />
         {isOffline ? (
           <div className="bg-ink px-4 py-1.5 text-center text-xs font-medium text-stone">
-            Offline — reconnect to sync Aramis cloud data
+            Offline — sales & changes are saved on this device and will sync when
+            the connection is fast enough
+            {pendingCount > 0 ? ` · ${pendingCount} pending` : ""}
+          </div>
+        ) : connection.status === "slow" ? (
+          <div className="bg-gold px-4 py-1.5 text-center text-xs font-medium text-ink">
+            Slow connection — working locally; auto-sync waits for a faster link
+            {pendingCount > 0 ? ` · ${pendingCount} pending` : ""}
           </div>
         ) : null}
 
@@ -183,19 +195,35 @@ export function AppShell({
               ? "Trial"
               : "Subscription"}{" "}
             ends in {Math.max(0, daysLeft)} day(s)
-            {warningLevel === "urgent" ? " — renew now" : ""} ·{" "}
-            <Link href="/app/billing" className="underline">
-              Billing
-            </Link>
+            {warningLevel === "urgent" ? " — renew now" : ""}
+            {hasFeature("billing") ? (
+              <>
+                {" "}
+                ·{" "}
+                <Link href="/app/billing" className="underline">
+                  Billing
+                </Link>
+              </>
+            ) : (
+              " — ask your owner to renew"
+            )}
           </div>
         ) : null}
 
         {accessBlocked ? (
           <div className="bg-coral px-4 py-1.5 text-center text-xs font-medium text-white">
-            Access paused — extend in{" "}
-            <Link href="/app/billing" className="underline">
-              Billing
-            </Link>
+            Access paused
+            {hasFeature("billing") ? (
+              <>
+                {" "}
+                — extend in{" "}
+                <Link href="/app/billing" className="underline">
+                  Billing
+                </Link>
+              </>
+            ) : (
+              " — ask your owner to renew"
+            )}
           </div>
         ) : null}
 
@@ -212,6 +240,9 @@ export function AppShell({
             <h1 className="truncate font-display text-xl text-ink sm:text-2xl">
               {title ?? "Dashboard"}
             </h1>
+          </div>
+          <div className="hidden sm:block">
+            <SyncControls compact />
           </div>
         </header>
 

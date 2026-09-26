@@ -9,6 +9,7 @@ import type {
   SaleOrder,
   UserAccount,
 } from "./types";
+import type { CloudCacheRow, SyncQueueItem } from "./offline/types";
 
 export class RmsSmallDB extends Dexie {
   business!: EntityTable<BusinessProfile, "id">;
@@ -19,6 +20,8 @@ export class RmsSmallDB extends Dexie {
   orders!: EntityTable<SaleOrder, "id">;
   dayCloses!: EntityTable<DayCloseRecord, "id">;
   meta!: EntityTable<AppMeta, "id">;
+  syncQueue!: EntityTable<SyncQueueItem, "id">;
+  cloudCache!: EntityTable<CloudCacheRow, "key">;
 
   constructor() {
     super("rms_small_pos");
@@ -31,6 +34,18 @@ export class RmsSmallDB extends Dexie {
       orders: "id, dayKey, createdAt, receiptNumber",
       dayCloses: "id, dayKey, closedAt, synced",
       meta: "id",
+    });
+    this.version(2).stores({
+      business: "id",
+      users: "id, username",
+      session: "id",
+      inventory: "id, name, updatedAt",
+      menu: "id, category, name, voteCount",
+      orders: "id, dayKey, createdAt, receiptNumber",
+      dayCloses: "id, dayKey, closedAt, synced",
+      meta: "id",
+      syncQueue: "id, orgId, createdAt, status, actionType",
+      cloudCache: "key, orgId, updatedAt",
     });
   }
 }

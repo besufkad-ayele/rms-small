@@ -104,13 +104,30 @@ export async function loadTenant(): Promise<TenantContext | null> {
     .eq("id", user.id)
     .maybeSingle();
 
-  const { data: membership } = await supabase
-    .from("memberships")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+  let membership = (
+    await supabase
+      .from("memberships")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("active", true)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle()
+  ).data;
+
+  // Pre-migration DBs may not have `active`
+  if (!membership) {
+    const legacy = await supabase
+      .from("memberships")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (legacy.data && legacy.data.active !== false) {
+      membership = legacy.data;
+    }
+  }
 
   if (!profile) return null;
 

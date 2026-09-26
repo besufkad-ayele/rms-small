@@ -1,8 +1,18 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // useOffline disabled — it was triggering Next.js global-error
-  // ("This page couldn't load") on client navigations in this app.
+  // Keep experimental.useOffline off — it previously triggered Next.js
+  // global-error on client navigations. Offline POS uses our own 5s
+  // connection checker + Dexie outbox instead (see src/lib/offline/).
+  headers: async () => [
+    {
+      source: "/sw.js",
+      headers: [
+        { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+        { key: "Service-Worker-Allowed", value: "/" },
+      ],
+    },
+  ],
 };
 
 export default nextConfig;

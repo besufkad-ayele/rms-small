@@ -5,7 +5,7 @@ import { MenuManager } from "@/components/menu/MenuManager";
 
 export default function MenuPage() {
   return (
-    <RequireAuth title="Menu" module="inventory">
+    <RequireAuth title="Menu" module="inventory" feature="menu">
       <MenuManager />
     </RequireAuth>
   );

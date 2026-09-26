@@ -32,6 +32,13 @@ npm install
 npm run dev                  # http://localhost:7778
 ```
 
+## Offline & installable app (PWA)
+
+- Connection is probed every **5 seconds** (`/api/health`).
+- When the link is down or slow, sales and edits are stored in IndexedDB and queued.
+- When the connection is **fast enough** (≤ 2s latency), pending work syncs automatically and a **popup** confirms success. You can also tap **Sync now**.
+- Install from the sidebar (**Install app**) on desktop Chrome/Edge, Android, or iOS (Share → Add to Home Screen).
+
 ## Brand
 
 **Aramis Product** — ink / teal / gold UI, mobile-first shell.

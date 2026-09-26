@@ -5,7 +5,7 @@ import { InventoryManager } from "@/components/inventory/InventoryManager";
 
 export default function InventoryPage() {
   return (
-    <RequireAuth title="Inventory" module="inventory">
+    <RequireAuth title="Inventory" module="inventory" feature="inventory">
       <InventoryManager />
     </RequireAuth>
   );
