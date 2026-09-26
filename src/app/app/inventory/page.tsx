@@ -1,12 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { LayoutDashboard, PackageMinus, PackagePlus } from "lucide-react";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { InventoryIssue } from "@/components/inventory/InventoryIssue";
 import { InventoryManager } from "@/components/inventory/InventoryManager";
 import { InventoryReceive } from "@/components/inventory/InventoryReceive";
-import { cn } from "@/lib/utils";
+import {
+  SegmentedTabs,
+  type SegmentedTabItem,
+} from "@/components/ui/SegmentedTabs";
+
+type InvTab = "dashboard" | "receive" | "issue";
 
 export default function InventoryPage() {
   return (
@@ -20,9 +26,25 @@ function InventoryWorkspace() {
   const { hasFeature } = useAuth();
   const canCatalog = hasFeature("inventory");
   const canIssue = hasFeature("inventory_issue");
-  const [tab, setTab] = useState<"dashboard" | "receive" | "issue">(
-    canCatalog ? "dashboard" : "issue",
-  );
+  const [tab, setTab] = useState<InvTab>(canCatalog ? "dashboard" : "issue");
+
+  const tabs = useMemo(() => {
+    const list: SegmentedTabItem<InvTab>[] = [];
+    if (canCatalog) {
+      list.push(
+        { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+        { id: "receive", label: "Receive & suppliers", icon: PackagePlus },
+      );
+    }
+    if (canIssue) {
+      list.push({
+        id: "issue",
+        label: "Issue / take-out",
+        icon: PackageMinus,
+      });
+    }
+    return list;
+  }, [canCatalog, canIssue]);
 
   if (!canCatalog && !canIssue) {
     return (
@@ -35,55 +57,10 @@ function InventoryWorkspace() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        {canCatalog ? (
-          <>
-            <TabBtn
-              active={tab === "dashboard"}
-              onClick={() => setTab("dashboard")}
-              label="Dashboard"
-            />
-            <TabBtn
-              active={tab === "receive"}
-              onClick={() => setTab("receive")}
-              label="Receive & suppliers"
-            />
-          </>
-        ) : null}
-        {canIssue ? (
-          <TabBtn
-            active={tab === "issue"}
-            onClick={() => setTab("issue")}
-            label="Issue / take-out"
-          />
-        ) : null}
-      </div>
+      <SegmentedTabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === "dashboard" && canCatalog ? <InventoryManager /> : null}
       {tab === "receive" && canCatalog ? <InventoryReceive /> : null}
       {tab === "issue" && canIssue ? <InventoryIssue /> : null}
     </div>
-  );
-}
-
-function TabBtn({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-full px-3 py-1.5 text-xs font-medium",
-        active ? "bg-teal text-white" : "bg-ink/5 text-ink/70",
-      )}
-    >
-      {label}
-    </button>
   );
 }

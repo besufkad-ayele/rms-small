@@ -29,6 +29,7 @@ import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import { PaidBillsPanel } from "@/components/finance/PaidBillsPanel";
 import { ReceiptDesigner } from "@/components/finance/ReceiptDesigner";
 import { SparkLines } from "@/components/finance/SparkLines";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import {
   defaultDateFilter,
   filterLabel,
@@ -304,32 +305,7 @@ export function FinanceDashboardPanel() {
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div
-          className="inline-flex w-full flex-wrap gap-1 rounded-2xl border border-ink/8 bg-white/90 p-1 sm:w-auto"
-          role="tablist"
-        >
-          {TABS.map((t) => {
-            const Icon = t.icon;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                role="tab"
-                aria-selected={tab === t.id}
-                onClick={() => setTab(t.id)}
-                className={cn(
-                  "inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition sm:flex-none",
-                  tab === t.id
-                    ? "bg-ink text-stone shadow-sm"
-                    : "text-ink/65 hover:bg-stone/60 hover:text-ink",
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
+        <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} />
 
         <div className="flex flex-wrap items-center gap-2">
           {PERIODS.map((p) => (

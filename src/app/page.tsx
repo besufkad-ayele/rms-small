@@ -4,14 +4,16 @@ import Link from "next/link";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 
 /**
  * Public home: show Sign in / Create account.
- * If already signed in, route into the app flow.
+ * If already signed in, hold loading until session is resolved, then route once.
  */
 export default function HomePage() {
   const {
     ready,
+    sessionResolved,
     user,
     tenant,
     hasMembership,
@@ -25,17 +27,17 @@ export default function HomePage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (!ready || !user) return;
+    if (!ready || !sessionResolved || !user) return;
     if (isPlatformAdmin && !hasMembership) {
       router.replace("/platform");
       return;
     }
-    if (tenantError && !tenant) return; // show retry
+    if (tenantError && !tenant) return;
     if (needsOnboarding) {
       router.replace("/onboarding");
       return;
     }
-    if (!tenant && hasMembership) return; // still loading / error
+    if (!tenant && hasMembership) return;
     if (awaitingVerification) {
       router.replace("/pending");
       return;
@@ -47,6 +49,7 @@ export default function HomePage() {
     if (tenant) router.replace("/app");
   }, [
     ready,
+    sessionResolved,
     user,
     tenant,
     hasMembership,
@@ -58,7 +61,11 @@ export default function HomePage() {
     router,
   ]);
 
-  if (ready && user && tenantError && !tenant) {
+  if (!ready || (user && !sessionResolved)) {
+    return <AuthLoadingScreen message="Checking session…" />;
+  }
+
+  if (ready && sessionResolved && user && tenantError && !tenant) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-ink px-4 text-center text-stone">
         <p className="font-display text-xl text-gold">Couldn’t load account</p>
@@ -74,13 +81,8 @@ export default function HomePage() {
     );
   }
 
-  // Signed-in users briefly see loading while we redirect
-  if (ready && user) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-ink text-stone">
-        <p className="text-sm text-stone/70">Opening Aramis…</p>
-      </div>
-    );
+  if (user) {
+    return <AuthLoadingScreen message="Opening Aramis…" />;
   }
 
   return (
@@ -120,10 +122,6 @@ export default function HomePage() {
             Create account
           </Link>
         </div>
-
-        {!ready ? (
-          <p className="mt-8 text-center text-xs text-stone/45">Checking session…</p>
-        ) : null}
       </div>
     </div>
   );

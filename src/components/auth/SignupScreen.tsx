@@ -41,7 +41,7 @@ export function SignupScreen() {
       setError(err);
       return;
     }
-    router.replace("/onboarding");
+    router.replace("/opening");
   }
 
   if (!ready) {

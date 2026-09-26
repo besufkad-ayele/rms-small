@@ -3,15 +3,18 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 
 export function OnboardingScreen() {
   const {
     ready,
+    sessionResolved,
     user,
     tenant,
     hasMembership,
     tenantError,
     awaitingVerification,
+    needsOnboarding,
     onboard,
     isPlatformAdmin,
     refresh,
@@ -26,7 +29,7 @@ export function OnboardingScreen() {
   const [hr, setHr] = useState(true);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !sessionResolved) return;
     if (!user) {
       router.replace("/login");
       return;
@@ -36,17 +39,19 @@ export function OnboardingScreen() {
       return;
     }
     // Already onboarded — never show form again
-    if (tenant || hasMembership) {
+    if (!needsOnboarding) {
       if (awaitingVerification) router.replace("/pending");
       else if (tenant) router.replace("/app");
-      // else: membership but tenant still loading / error — stay briefly
+      else if (hasMembership) router.replace("/opening");
     }
   }, [
     ready,
+    sessionResolved,
     user,
     tenant,
     hasMembership,
     awaitingVerification,
+    needsOnboarding,
     isPlatformAdmin,
     router,
   ]);
@@ -87,7 +92,11 @@ export function OnboardingScreen() {
     router.replace("/pending");
   }
 
-  if (ready && tenantError && hasMembership && !tenant) {
+  if (!ready || !sessionResolved || !user || !needsOnboarding) {
+    return <AuthLoadingScreen message="Checking your account…" />;
+  }
+
+  if (tenantError && hasMembership && !tenant) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-stone px-4 text-center">
         <p className="font-display text-xl">Couldn’t load your business</p>
@@ -99,18 +108,6 @@ export function OnboardingScreen() {
         >
           Retry
         </button>
-      </div>
-    );
-  }
-
-  if (!ready || !user || tenant || hasMembership) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-stone text-ink">
-        <p className="text-sm text-ink/60">
-          {hasMembership || tenant
-            ? "Redirecting…"
-            : "Preparing onboarding…"}
-        </p>
       </div>
     );
   }

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 import { APP_MODULE_LABELS, moduleFlag, type AppModule } from "@/lib/tenant";
 import { formatDateTime } from "@/lib/utils";
 
@@ -17,6 +18,7 @@ const MODULES: AppModule[] = [
 export default function PendingPage() {
   const {
     ready,
+    sessionResolved,
     user,
     tenant,
     hasMembership,
@@ -30,7 +32,7 @@ export default function PendingPage() {
   const [details, setDetails] = useState<Record<string, string> | null>(null);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !sessionResolved) return;
     if (!user) {
       router.replace("/login");
       return;
@@ -48,6 +50,7 @@ export default function PendingPage() {
     }
   }, [
     ready,
+    sessionResolved,
     user,
     tenant,
     hasMembership,
@@ -97,20 +100,12 @@ export default function PendingPage() {
     );
   }
 
-  if (!ready || !tenant) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-stone">
-        <p className="text-sm text-ink/60">Checking status…</p>
-      </div>
-    );
+  if (!ready || !sessionResolved || !tenant) {
+    return <AuthLoadingScreen message="Checking status…" />;
   }
 
   if (!awaitingVerification) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-stone">
-        <p className="text-sm text-ink/60">Approved — opening Aramis…</p>
-      </div>
-    );
+    return <AuthLoadingScreen message="Approved — opening Aramis…" />;
   }
 
   return (

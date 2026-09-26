@@ -3,11 +3,13 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { SignupScreen } from "@/components/auth/SignupScreen";
+import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 import { useAuth } from "@/components/auth/AuthProvider";
 
 export default function SignupPage() {
   const {
     ready,
+    sessionResolved,
     user,
     tenant,
     hasMembership,
@@ -21,7 +23,7 @@ export default function SignupPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (!ready || !user) return;
+    if (!ready || !sessionResolved || !user) return;
     if (isPlatformAdmin && !hasMembership) {
       router.replace("/platform");
       return;
@@ -43,6 +45,7 @@ export default function SignupPage() {
     router.replace("/app");
   }, [
     ready,
+    sessionResolved,
     user,
     tenant,
     hasMembership,
@@ -54,7 +57,11 @@ export default function SignupPage() {
     router,
   ]);
 
-  if (ready && user && tenantError && !tenant) {
+  if (!ready || (user && !sessionResolved)) {
+    return <AuthLoadingScreen message="Checking your account…" />;
+  }
+
+  if (ready && sessionResolved && user && tenantError && !tenant) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-ink px-4 text-center text-stone">
         <p className="font-display text-xl text-gold">Couldn’t load account</p>
@@ -68,6 +75,10 @@ export default function SignupPage() {
         </button>
       </div>
     );
+  }
+
+  if (user) {
+    return <AuthLoadingScreen message="Opening Aramis…" />;
   }
 
   return <SignupScreen />;

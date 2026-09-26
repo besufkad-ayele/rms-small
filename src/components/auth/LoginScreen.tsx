@@ -46,7 +46,7 @@ export function LoginScreen({
       setError(err);
       return;
     }
-    router.replace("/");
+    router.replace("/opening");
   }
 
   if (!ready) {

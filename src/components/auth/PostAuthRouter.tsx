@@ -1,12 +1,20 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { LoginScreen } from "@/components/auth/LoginScreen";
-import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 
-function StaffLoginGate() {
+/**
+ * After login/signup: stay on a loading screen until session + membership
+ * are fully resolved, then route once to the correct destination.
+ * Never flash /onboarding while tenant is still loading.
+ */
+export function PostAuthRouter({
+  message = "Signing you in…",
+}: {
+  message?: string;
+}) {
   const {
     ready,
     sessionResolved,
@@ -16,31 +24,46 @@ function StaffLoginGate() {
     tenantError,
     isPlatformAdmin,
     awaitingVerification,
+    needsOnboarding,
     accessBlocked,
     refresh,
   } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!ready || !sessionResolved || !user) return;
+    if (!ready || !sessionResolved) return;
+
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+
     if (isPlatformAdmin && !hasMembership) {
       router.replace("/platform");
       return;
     }
+
     if (tenantError && !tenant) return;
-    if (!tenant) {
-      // Staff should already belong to an org — never send to onboarding
-      router.replace("/login");
+
+    if (needsOnboarding) {
+      router.replace("/onboarding");
       return;
     }
+
+    if (!tenant && hasMembership) return;
+
+    if (!tenant) return;
+
     if (awaitingVerification) {
       router.replace("/pending");
       return;
     }
+
     if (accessBlocked) {
       router.replace("/app/billing");
       return;
     }
+
     router.replace("/app");
   }, [
     ready,
@@ -51,13 +74,10 @@ function StaffLoginGate() {
     tenantError,
     isPlatformAdmin,
     awaitingVerification,
+    needsOnboarding,
     accessBlocked,
     router,
   ]);
-
-  if (!ready || (user && !sessionResolved)) {
-    return <AuthLoadingScreen message="Checking your account…" />;
-  }
 
   if (ready && sessionResolved && user && tenantError && !tenant) {
     return (
@@ -75,17 +95,5 @@ function StaffLoginGate() {
     );
   }
 
-  if (user) {
-    return <AuthLoadingScreen message="Opening Aramis…" />;
-  }
-
-  return <LoginScreen variant="staff" />;
-}
-
-export default function StaffLoginPage() {
-  return (
-    <Suspense fallback={<AuthLoadingScreen />}>
-      <StaffLoginGate />
-    </Suspense>
-  );
+  return <AuthLoadingScreen message={message} />;
 }

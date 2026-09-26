@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 import { AppShell } from "@/components/layout/AppShell";
 import type { AppModule } from "@/lib/tenant";
 import type { StaffFeature } from "@/lib/permissions";
@@ -23,6 +24,7 @@ export function RequireAuth({
 }) {
   const {
     ready,
+    sessionResolved,
     user,
     tenant,
     hasMembership,
@@ -38,7 +40,7 @@ export function RequireAuth({
   const router = useRouter();
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !sessionResolved) return;
     if (!user) {
       router.replace("/login");
       return;
@@ -52,7 +54,6 @@ export function RequireAuth({
       return;
     }
     if (tenantError && !tenant) {
-      // Stay — error UI below
       return;
     }
     if (awaitingVerification && !allowWhenBlocked) {
@@ -74,6 +75,7 @@ export function RequireAuth({
     }
   }, [
     ready,
+    sessionResolved,
     user,
     needsOnboarding,
     awaitingVerification,
@@ -90,12 +92,8 @@ export function RequireAuth({
     router,
   ]);
 
-  if (!ready || !user) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-stone text-ink">
-        <p className="text-sm text-ink/60">Loading Aramis…</p>
-      </div>
-    );
+  if (!ready || !sessionResolved || !user) {
+    return <AuthLoadingScreen message="Loading Aramis…" />;
   }
 
   if (tenantError && !tenant) {
@@ -115,19 +113,11 @@ export function RequireAuth({
   }
 
   if (needsOnboarding) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-stone text-ink">
-        <p className="text-sm text-ink/60">Opening onboarding…</p>
-      </div>
-    );
+    return <AuthLoadingScreen message="Opening Aramis…" />;
   }
 
   if (!tenant) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-stone text-ink">
-        <p className="text-sm text-ink/60">Loading Aramis…</p>
-      </div>
-    );
+    return <AuthLoadingScreen message="Loading Aramis…" />;
   }
 
   if (awaitingVerification && !allowWhenBlocked) {

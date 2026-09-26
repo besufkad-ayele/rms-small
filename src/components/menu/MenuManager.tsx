@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import {
   type CloudInventoryItem,
@@ -472,7 +473,7 @@ export function MenuManager() {
         </section>
 
         <section className="rounded-3xl border border-ink/8 bg-white/80 p-4 sm:p-5">
-          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="font-display text-xl">
                 Menu ({filtered.length}
@@ -485,37 +486,18 @@ export function MenuManager() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                onClick={() => setTagFilter("all")}
-                className={cn(
-                  "rounded-full px-2.5 py-1 text-xs font-medium",
-                  tagFilter === "all"
-                    ? "bg-ink text-stone"
-                    : "bg-ink/5 text-ink/65",
-                )}
-              >
-                All tags
-              </button>
-              {MENU_TAGS.slice(0, 8).map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() =>
-                    setTagFilter((prev) => (prev === t.id ? "all" : t.id))
-                  }
-                  className={cn(
-                    "rounded-full px-2.5 py-1 text-xs font-medium",
-                    tagFilter === t.id
-                      ? "bg-teal text-white"
-                      : "bg-ink/5 text-ink/65",
-                  )}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
+            <SegmentedTabs
+              size="sm"
+              value={tagFilter}
+              onChange={setTagFilter}
+              tabs={[
+                { id: "all" as const, label: "All tags" },
+                ...MENU_TAGS.slice(0, 8).map((t) => ({
+                  id: t.id as string,
+                  label: t.label,
+                })),
+              ]}
+            />
           </div>
           <ul className="mt-4 space-y-2">
             {filtered.map((item) => (

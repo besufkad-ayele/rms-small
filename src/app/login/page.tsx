@@ -3,11 +3,13 @@
 import { Suspense, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { LoginScreen } from "@/components/auth/LoginScreen";
+import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 import { useAuth } from "@/components/auth/AuthProvider";
 
 function LoginGate() {
   const {
     ready,
+    sessionResolved,
     user,
     tenant,
     hasMembership,
@@ -21,7 +23,8 @@ function LoginGate() {
   const router = useRouter();
 
   useEffect(() => {
-    if (!ready || !user) return;
+    // Wait until membership is fully known — never bounce to onboarding early
+    if (!ready || !sessionResolved || !user) return;
     if (isPlatformAdmin && !hasMembership) {
       router.replace("/platform");
       return;
@@ -43,6 +46,7 @@ function LoginGate() {
     router.replace("/app");
   }, [
     ready,
+    sessionResolved,
     user,
     tenant,
     hasMembership,
@@ -54,7 +58,11 @@ function LoginGate() {
     router,
   ]);
 
-  if (ready && user && tenantError && !tenant) {
+  if (!ready || (user && !sessionResolved)) {
+    return <AuthLoadingScreen message="Checking your account…" />;
+  }
+
+  if (ready && sessionResolved && user && tenantError && !tenant) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-ink px-4 text-center text-stone">
         <p className="font-display text-xl text-gold">Couldn’t load account</p>
@@ -70,18 +78,17 @@ function LoginGate() {
     );
   }
 
+  // Already signed in — hold on loading while we route (don't flash login form)
+  if (user) {
+    return <AuthLoadingScreen message="Opening Aramis…" />;
+  }
+
   return <LoginScreen />;
 }
 
 export default function LoginPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-dvh items-center justify-center bg-ink text-stone">
-          <p className="text-sm text-stone/70">Loading…</p>
-        </div>
-      }
-    >
+    <Suspense fallback={<AuthLoadingScreen />}>
       <LoginGate />
     </Suspense>
   );

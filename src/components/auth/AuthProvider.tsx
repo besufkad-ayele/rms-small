@@ -40,6 +40,11 @@ import { hasFeature as checkFeature, type StaffFeature } from "@/lib/permissions
 
 interface AuthState {
   ready: boolean;
+  /**
+   * True only after a full auth+tenant load finished for the current session.
+   * Until then, never treat the user as needing onboarding (avoids flash).
+   */
+  sessionResolved: boolean;
   user: User | null;
   profile: Profile | null;
   tenant: TenantContext | null;
@@ -128,6 +133,7 @@ function featureModule(feature: StaffFeature): AppModule | null {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
+  const [sessionResolved, setSessionResolved] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [tenant, setTenant] = useState<TenantContext | null>(null);
@@ -142,10 +148,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // That left stale hasMembership=false after onboard/login and sent users
     // back to /onboarding forever.
     const run = async () => {
+      setSessionResolved(false);
       try {
         const u = await getUser();
-        setUser(u);
         if (!u) {
+          setUser(null);
           setProfile(null);
           setTenant(null);
           setHasMembership(false);
@@ -156,17 +163,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           loadProfile(),
           loadTenantDetailed(),
         ]);
+
+        // Apply user + membership together so needsOnboarding never flashes true
+        // between setUser and setHasMembership.
+        setUser(u);
         setProfile(p);
 
         if (tenantResult.error && tenantResult.hasMembership) {
-          // Membership exists — keep prior tenant if we have one; never clear to onboarding
           setHasMembership(true);
           setTenantError(tenantResult.error);
           if (tenantResult.tenant) setTenant(tenantResult.tenant);
         } else if (tenantResult.error && !tenantResult.hasMembership) {
-          // Ambiguous failure (network) — do NOT assume needs onboarding
           setTenantError(tenantResult.error);
-          // Leave hasMembership/tenant as-is if we already knew them
         } else {
           setTenantError(null);
           setHasMembership(tenantResult.hasMembership);
@@ -177,9 +185,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setTenantError(
           err instanceof Error ? err.message : "Could not load your account",
         );
-        // Do NOT clear tenant/hasMembership on transient errors
       } finally {
         setReady(true);
+        setSessionResolved(true);
         lastRefreshAt.current = Date.now();
       }
     };
@@ -199,7 +207,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await refresh();
       } catch (err) {
         console.error(err);
-        if (!cancelled) setReady(true);
+        if (!cancelled) {
+          setReady(true);
+          setSessionResolved(true);
+        }
       }
     })();
 
@@ -226,6 +237,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error("Supabase client init failed", err);
       setReady(true);
+      setSessionResolved(true);
     }
 
     return () => {
@@ -236,8 +248,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
+      setSessionResolved(false);
       const result = await signIn(email, password);
-      if ("error" in result && result.error) return result.error;
+      if ("error" in result && result.error) {
+        setSessionResolved(true);
+        return result.error;
+      }
       await refresh();
       return null;
     },
@@ -251,8 +267,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       fullName: string;
       phone?: string;
     }) => {
+      setSessionResolved(false);
       const result = await signUp(input);
-      if ("error" in result && result.error) return result.error;
+      if ("error" in result && result.error) {
+        setSessionResolved(true);
+        return result.error;
+      }
       await refresh();
       return null;
     },
@@ -346,6 +366,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setTenant(null);
     setHasMembership(false);
     setTenantError(null);
+    setSessionResolved(true);
   }, []);
 
   const isPlatformAdmin = Boolean(profile?.is_platform_admin);
@@ -353,9 +374,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     tenant && !isOrgVerified(tenant.organization),
   );
   const accessBlocked = Boolean(tenant && !tenantCanUseApp(tenant));
-  // ONLY when we know there is no membership — never on load errors
+  // ONLY when session is fully resolved and we know there is no membership
   const needsOnboarding = Boolean(
-    user &&
+    sessionResolved &&
+      user &&
       !isPlatformAdmin &&
       !hasMembership &&
       !tenant &&
@@ -411,6 +433,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       ready,
+      sessionResolved,
       user,
       profile,
       tenant,
@@ -435,6 +458,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }),
     [
       ready,
+      sessionResolved,
       user,
       profile,
       tenant,
