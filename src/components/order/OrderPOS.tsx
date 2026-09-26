@@ -12,6 +12,7 @@ import {
 } from "@/lib/offline/resilient";
 import type { MenuCategory, PaymentMethod } from "@/lib/tenant";
 import { MENU_CATEGORIES } from "@/lib/menu-categories";
+import { sortMenuByTags, tagLabel } from "@/lib/menu-tags";
 import { cn, formatMoney } from "@/lib/utils";
 import { ThermalReceipt } from "@/components/order/ThermalReceipt";
 
@@ -42,10 +43,13 @@ export function OrderPOS() {
   }, [reload]);
 
   const available = menu.filter((m) => m.available);
-  const filtered =
-    category === "all"
-      ? available
-      : available.filter((m) => m.category === category);
+  const filtered = useMemo(() => {
+    const list =
+      category === "all"
+        ? available
+        : available.filter((m) => m.category === category);
+    return sortMenuByTags(list);
+  }, [available, category]);
   const subtotal = useMemo(
     () => cart.reduce((s, c) => s + c.menuItem.price * c.quantity, 0),
     [cart],
@@ -156,6 +160,18 @@ export function OrderPOS() {
               className="rounded-2xl border border-ink/8 bg-stone/60 p-3 text-left transition hover:border-teal/40 hover:bg-teal/5 active:scale-[0.98]"
             >
               <p className="font-medium leading-snug">{item.name}</p>
+              {(item.tags || []).length > 0 ? (
+                <p className="mt-1 flex flex-wrap gap-1">
+                  {(item.tags || []).slice(0, 3).map((t) => (
+                    <span
+                      key={t}
+                      className="rounded-full bg-ink/5 px-1.5 py-0.5 text-[10px] text-ink/55"
+                    >
+                      {tagLabel(t)}
+                    </span>
+                  ))}
+                </p>
+              ) : null}
               {item.description ? (
                 <p className="mt-1 line-clamp-2 text-[11px] text-ink/50">
                   {item.description}

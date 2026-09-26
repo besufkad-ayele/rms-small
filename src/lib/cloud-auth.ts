@@ -6,6 +6,7 @@ import type {
   Profile,
   Subscription,
   TenantContext,
+  TenantLoadResult,
 } from "@/lib/tenant";
 
 const TRIAL_DAYS = Number(process.env.NEXT_PUBLIC_TRIAL_DAYS || 14);
@@ -82,81 +83,155 @@ export async function getUser(): Promise<User | null> {
   return data.user;
 }
 
-export async function loadTenant(): Promise<TenantContext | null> {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
+/**
+ * Load tenant for the signed-in user.
+ * Distinguishes “no membership” (needs onboarding) from load failures
+ * when a membership already exists (must NOT send user to onboarding).
+ */
+export async function loadTenantDetailed(): Promise<TenantLoadResult> {
+  try {
+    const supabase = createClient();
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
+    if (userErr) {
+      return { tenant: null, hasMembership: false, error: userErr.message };
+    }
+    if (!user) {
+      return { tenant: null, hasMembership: false, error: null };
+    }
 
-  // Bootstrap platform admin from env (first matching login)
-  const adminEmail = process.env.NEXT_PUBLIC_PLATFORM_ADMIN_EMAIL?.toLowerCase();
-  if (adminEmail && user.email?.toLowerCase() === adminEmail) {
-    await supabase
+    // Bootstrap platform admin from env (first matching login)
+    const adminEmail =
+      process.env.NEXT_PUBLIC_PLATFORM_ADMIN_EMAIL?.toLowerCase();
+    if (adminEmail && user.email?.toLowerCase() === adminEmail) {
+      await supabase
+        .from("profiles")
+        .update({ is_platform_admin: true, email: user.email })
+        .eq("id", user.id);
+    }
+
+    const { data: profile, error: profileErr } = await supabase
       .from("profiles")
-      .update({ is_platform_admin: true, email: user.email })
-      .eq("id", user.id);
-  }
+      .select("*")
+      .eq("id", user.id)
+      .maybeSingle();
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle();
+    if (profileErr) {
+      return {
+        tenant: null,
+        hasMembership: false,
+        error: profileErr.message,
+      };
+    }
 
-  let membership = (
-    await supabase
+    const membershipQuery = await supabase
       .from("memberships")
       .select("*")
       .eq("user_id", user.id)
       .eq("active", true)
       .order("created_at", { ascending: true })
       .limit(1)
-      .maybeSingle()
-  ).data;
-
-  // Pre-migration DBs may not have `active`
-  if (!membership) {
-    const legacy = await supabase
-      .from("memberships")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: true })
-      .limit(1)
       .maybeSingle();
-    if (legacy.data && legacy.data.active !== false) {
-      membership = legacy.data;
+
+    let membership = membershipQuery.data;
+
+    // Pre-migration DBs may not have `active`, or first query may error
+    if (!membership) {
+      const legacy = await supabase
+        .from("memberships")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (legacy.error && membershipQuery.error) {
+        return {
+          tenant: null,
+          hasMembership: false,
+          error: legacy.error.message || membershipQuery.error.message,
+        };
+      }
+      if (legacy.error && !legacy.data) {
+        // Only treat as hard failure when we have no row at all
+        if (membershipQuery.error) {
+          return {
+            tenant: null,
+            hasMembership: false,
+            error: membershipQuery.error.message,
+          };
+        }
+      } else if (legacy.data && legacy.data.active !== false) {
+        membership = legacy.data;
+      }
     }
+
+    if (!membership) {
+      return { tenant: null, hasMembership: false, error: null };
+    }
+
+    if (!profile) {
+      return {
+        tenant: null,
+        hasMembership: true,
+        error: "Profile missing — try refreshing or contact support.",
+      };
+    }
+
+    const [
+      { data: organization, error: orgErr },
+      { data: subscription, error: subErr },
+    ] = await Promise.all([
+      supabase
+        .from("organizations")
+        .select("*")
+        .eq("id", membership.organization_id)
+        .single(),
+      supabase
+        .from("subscriptions")
+        .select("*")
+        .eq("organization_id", membership.organization_id)
+        .single(),
+    ]);
+
+    if (orgErr || !organization) {
+      return {
+        tenant: null,
+        hasMembership: true,
+        error: orgErr?.message || "Could not load your business.",
+      };
+    }
+    if (subErr || !subscription) {
+      return {
+        tenant: null,
+        hasMembership: true,
+        error: subErr?.message || "Could not load subscription.",
+      };
+    }
+
+    return {
+      tenant: {
+        profile: profile as Profile,
+        organization: organization as Organization,
+        membership: membership as Membership,
+        subscription: subscription as Subscription,
+      },
+      hasMembership: true,
+      error: null,
+    };
+  } catch (err) {
+    return {
+      tenant: null,
+      hasMembership: false,
+      error: err instanceof Error ? err.message : "Failed to load account",
+    };
   }
+}
 
-  if (!profile) return null;
-
-  // Platform admins may have no tenant org
-  if (!membership) {
-    return null;
-  }
-
-  const [{ data: organization }, { data: subscription }] = await Promise.all([
-    supabase
-      .from("organizations")
-      .select("*")
-      .eq("id", membership.organization_id)
-      .single(),
-    supabase
-      .from("subscriptions")
-      .select("*")
-      .eq("organization_id", membership.organization_id)
-      .single(),
-  ]);
-
-  if (!organization || !subscription) return null;
-
-  return {
-    profile: profile as Profile,
-    organization: organization as Organization,
-    membership: membership as Membership,
-    subscription: subscription as Subscription,
-  };
+export async function loadTenant(): Promise<TenantContext | null> {
+  const result = await loadTenantDetailed();
+  return result.tenant;
 }
 
 export async function loadProfile(): Promise<Profile | null> {
@@ -205,13 +280,28 @@ export async function onboardOrganization(input: {
   city?: string;
   region?: string;
   country?: string;
+  tin?: string;
+  vatNumber?: string;
+  website?: string;
   inventoryEnabled: boolean;
   financeEnabled: boolean;
+  menuEnabled?: boolean;
+  orderingEnabled?: boolean;
+  hrEnabled?: boolean;
   licenseFile?: File | null;
   idFile?: File | null;
 }) {
-  if (!input.inventoryEnabled && !input.financeEnabled) {
-    return { error: "Enable at least one module (Inventory or Finance)." };
+  const menu = input.menuEnabled ?? input.inventoryEnabled;
+  const ordering = input.orderingEnabled ?? input.inventoryEnabled;
+  const hr = input.hrEnabled ?? true;
+  if (
+    !input.inventoryEnabled &&
+    !input.financeEnabled &&
+    !menu &&
+    !ordering &&
+    !hr
+  ) {
+    return { error: "Enable at least one module." };
   }
 
   const supabase = createClient();
@@ -220,8 +310,10 @@ export async function onboardOrganization(input: {
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in." };
 
-  const existing = await loadTenant();
-  if (existing) return { error: "You already own or belong to a business." };
+  const existing = await loadTenantDetailed();
+  if (existing.hasMembership) {
+    return { error: "You already own or belong to a business." };
+  }
 
   let licensePath: string | null = null;
   let idPath: string | null = null;
@@ -245,26 +337,47 @@ export async function onboardOrganization(input: {
     p_id_doc: idPath,
     p_inventory: input.inventoryEnabled,
     p_finance: input.financeEnabled,
+    p_tin: input.tin?.trim() || null,
+    p_vat: input.vatNumber?.trim() || null,
+    p_website: input.website?.trim() || null,
+    p_menu: menu,
+    p_ordering: ordering,
+    p_hr: hr,
   });
 
   if (error) return { error: error.message };
   return { organizationId: orgId as string };
 }
 
-export async function updateModules(input: {
-  organizationId: string;
+export type ModuleFlags = {
+  menuEnabled: boolean;
+  orderingEnabled: boolean;
   inventoryEnabled: boolean;
   financeEnabled: boolean;
-}) {
-  if (!input.inventoryEnabled && !input.financeEnabled) {
+  hrEnabled: boolean;
+};
+
+export async function updateModules(
+  input: { organizationId: string } & ModuleFlags,
+) {
+  if (
+    !input.menuEnabled &&
+    !input.orderingEnabled &&
+    !input.inventoryEnabled &&
+    !input.financeEnabled &&
+    !input.hrEnabled
+  ) {
     return { error: "Keep at least one module enabled." };
   }
   const supabase = createClient();
   const { error } = await supabase
     .from("subscriptions")
     .update({
+      menu_enabled: input.menuEnabled,
+      ordering_enabled: input.orderingEnabled,
       inventory_enabled: input.inventoryEnabled,
       finance_enabled: input.financeEnabled,
+      hr_enabled: input.hrEnabled,
       updated_at: new Date().toISOString(),
     })
     .eq("organization_id", input.organizationId);
@@ -279,6 +392,10 @@ export async function submitPaymentProof(input: {
   reference?: string;
   file: File;
   monthsRequested?: number;
+  modules?: Partial<ModuleFlags>;
+  packageCode?: string | null;
+  expectedAmountEtb?: number | null;
+  amountBreakdown?: Record<string, unknown> | null;
 }) {
   const supabase = createClient();
   const {
@@ -287,7 +404,8 @@ export async function submitPaymentProof(input: {
   if (!user) return { error: "Not signed in." };
 
   const months = Math.min(12, Math.max(1, input.monthsRequested ?? 1));
-  const ext = input.file.name.split(".").pop() || "jpg";
+  const isVideo = input.file.type.startsWith("video/");
+  const ext = input.file.name.split(".").pop() || (isVideo ? "mp4" : "jpg");
   const path = `${input.organizationId}/${Date.now()}.${ext}`;
   const { error: uploadError } = await supabase.storage
     .from("payment-proofs")
@@ -305,6 +423,16 @@ export async function submitPaymentProof(input: {
     status: "pending",
     submitted_by: user.id,
     months_requested: months,
+    media_kind: isVideo ? "video" : "image",
+    menu_enabled: input.modules?.menuEnabled ?? null,
+    ordering_enabled: input.modules?.orderingEnabled ?? null,
+    inventory_enabled: input.modules?.inventoryEnabled ?? null,
+    finance_enabled: input.modules?.financeEnabled ?? null,
+    hr_enabled: input.modules?.hrEnabled ?? null,
+    package_code: input.packageCode || null,
+    expected_amount_etb:
+      input.expectedAmountEtb != null ? Number(input.expectedAmountEtb) : null,
+    amount_breakdown: input.amountBreakdown || null,
   });
   if (error) return { error: error.message };
 

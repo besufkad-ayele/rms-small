@@ -5,21 +5,51 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 
 export function OnboardingScreen() {
-  const { ready, user, tenant, onboard, isPlatformAdmin } = useAuth();
+  const {
+    ready,
+    user,
+    tenant,
+    hasMembership,
+    tenantError,
+    awaitingVerification,
+    onboard,
+    isPlatformAdmin,
+    refresh,
+  } = useAuth();
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [menu, setMenu] = useState(true);
+  const [ordering, setOrdering] = useState(true);
   const [inventory, setInventory] = useState(true);
   const [finance, setFinance] = useState(true);
+  const [hr, setHr] = useState(true);
 
   useEffect(() => {
     if (!ready) return;
-    if (!user) router.replace("/login");
-    else if (isPlatformAdmin && !tenant) router.replace("/platform");
-    else if (tenant?.organization.verification_status === "pending")
-      router.replace("/pending");
-    else if (tenant) router.replace("/app");
-  }, [ready, user, tenant, isPlatformAdmin, router]);
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+    if (isPlatformAdmin && !hasMembership) {
+      router.replace("/platform");
+      return;
+    }
+    // Already onboarded — never show form again
+    if (tenant || hasMembership) {
+      if (awaitingVerification) router.replace("/pending");
+      else if (tenant) router.replace("/app");
+      // else: membership but tenant still loading / error — stay briefly
+    }
+  }, [
+    ready,
+    user,
+    tenant,
+    hasMembership,
+    awaitingVerification,
+    isPlatformAdmin,
+    router,
+  ]);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -38,8 +68,14 @@ export function OnboardingScreen() {
       city: String(fd.get("city") ?? ""),
       region: String(fd.get("region") ?? ""),
       country: String(fd.get("country") ?? "Ethiopia"),
+      tin: String(fd.get("tin") ?? ""),
+      vatNumber: String(fd.get("vat") ?? ""),
+      website: String(fd.get("website") ?? ""),
       inventoryEnabled: inventory,
       financeEnabled: finance,
+      menuEnabled: menu,
+      orderingEnabled: ordering,
+      hrEnabled: hr,
       licenseFile: (fd.get("license") as File) || null,
       idFile: (fd.get("idDoc") as File) || null,
     });
@@ -51,10 +87,30 @@ export function OnboardingScreen() {
     router.replace("/pending");
   }
 
-  if (!ready || !user || tenant) {
+  if (ready && tenantError && hasMembership && !tenant) {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-stone px-4 text-center">
+        <p className="font-display text-xl">Couldn’t load your business</p>
+        <p className="max-w-sm text-sm text-ink/60">{tenantError}</p>
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          className="rounded-xl bg-teal px-5 py-2.5 text-sm font-semibold text-white"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (!ready || !user || tenant || hasMembership) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-stone text-ink">
-        <p className="text-sm text-ink/60">Preparing onboarding…</p>
+        <p className="text-sm text-ink/60">
+          {hasMembership || tenant
+            ? "Redirecting…"
+            : "Preparing onboarding…"}
+        </p>
       </div>
     );
   }
@@ -70,8 +126,8 @@ export function OnboardingScreen() {
         </h1>
         <p className="mt-2 text-sm text-ink/60">
           Tell us about your café or restaurant and pick modules. After Aramis
-          approves, they send your login password — then you sign in and your
-          14-day trial starts.
+          approves, sign in with the email and password you already created —
+          your 14-day trial starts then.
         </p>
 
         <form
@@ -124,50 +180,73 @@ export function OnboardingScreen() {
               <input name="country" className="field" defaultValue="Ethiopia" />
             </label>
           </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="block text-sm">
+              <span className="mb-1 block text-ink/60">TIN</span>
+              <input name="tin" className="field" placeholder="Optional" />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-ink/60">VAT number</span>
+              <input name="vat" className="field" placeholder="Optional" />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-ink/60">Website</span>
+              <input name="website" className="field" placeholder="Optional" />
+            </label>
+          </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-sm">
               <span className="mb-1 block text-ink/60">
                 Business license (optional)
               </span>
-              <input name="license" type="file" accept="image/*,.pdf" className="block w-full text-sm" />
+              <input
+                name="license"
+                type="file"
+                accept="image/*,.pdf"
+                className="block w-full text-sm"
+              />
             </label>
             <label className="block text-sm">
               <span className="mb-1 block text-ink/60">Owner ID (optional)</span>
-              <input name="idDoc" type="file" accept="image/*,.pdf" className="block w-full text-sm" />
+              <input
+                name="idDoc"
+                type="file"
+                accept="image/*,.pdf"
+                className="block w-full text-sm"
+              />
             </label>
           </div>
 
           <div className="space-y-2 rounded-2xl bg-stone/70 p-4">
             <p className="text-sm font-semibold text-ink">Modules you want</p>
-            <label className="flex items-start gap-3 rounded-xl bg-white p-3 text-sm">
-              <input
-                type="checkbox"
-                checked={inventory}
-                onChange={(e) => setInventory(e.target.checked)}
-                className="mt-1"
-              />
-              <span>
-                <span className="font-medium">Inventory</span>
-                <span className="mt-0.5 block text-xs text-ink/55">
-                  Menu, stock, cashier / orders
+            {(
+              [
+                ["menu", menu, setMenu, "Menu", "Item catalog & recipes"],
+                ["ordering", ordering, setOrdering, "Ordering", "Cashier POS"],
+                ["inventory", inventory, setInventory, "Inventory", "Stock & costs"],
+                ["finance", finance, setFinance, "Finance", "Reports & day close"],
+                ["hr", hr, setHr, "HR / Staff", "Team seats & permissions"],
+              ] as const
+            ).map(([key, checked, set, label, blurb]) => (
+              <label
+                key={key}
+                className="flex items-start gap-3 rounded-xl bg-white p-3 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => set(e.target.checked)}
+                  className="mt-1"
+                />
+                <span>
+                  <span className="font-medium">{label}</span>
+                  <span className="mt-0.5 block text-xs text-ink/55">
+                    {blurb}
+                  </span>
                 </span>
-              </span>
-            </label>
-            <label className="flex items-start gap-3 rounded-xl bg-white p-3 text-sm">
-              <input
-                type="checkbox"
-                checked={finance}
-                onChange={(e) => setFinance(e.target.checked)}
-                className="mt-1"
-              />
-              <span>
-                <span className="font-medium">Finance</span>
-                <span className="mt-0.5 block text-xs text-ink/55">
-                  Sales dashboard, COGS, Excel export, day close
-                </span>
-              </span>
-            </label>
+              </label>
+            ))}
           </div>
 
           <button

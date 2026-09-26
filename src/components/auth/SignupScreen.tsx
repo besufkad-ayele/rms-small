@@ -3,29 +3,36 @@
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
-
-/** Temporary password only for the onboarding session — never shown. Real password is issued on approval. */
-function makeTempPassword() {
-  const a = Math.random().toString(36).slice(2, 10);
-  const b = Math.random().toString(36).slice(2, 8);
-  return `Tmp${a}${b}!9`;
-}
 
 export function SignupScreen() {
   const { ready, register } = useAuth();
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     const fd = new FormData(e.currentTarget);
+    const password = String(fd.get("password") ?? "");
+    const confirm = String(fd.get("confirmPassword") ?? "");
+    if (password.length < 8) {
+      setBusy(false);
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (password !== confirm) {
+      setBusy(false);
+      setError("Passwords do not match.");
+      return;
+    }
     const err = await register({
       email: String(fd.get("email") ?? ""),
-      password: makeTempPassword(),
+      password,
       fullName: String(fd.get("fullName") ?? ""),
       phone: String(fd.get("phone") ?? ""),
     });
@@ -57,8 +64,9 @@ export function SignupScreen() {
             Create account
           </h1>
           <p className="mx-auto mt-3 max-w-sm text-sm text-stone/70">
-            No password here. After you onboard and we approve you, Aramis sends
-            your login password — then you sign in.
+            Choose your email and password now — these are your login
+            credentials. After you onboard, Aramis reviews your business, then
+            you sign in with the same password.
           </p>
         </div>
 
@@ -69,6 +77,7 @@ export function SignupScreen() {
               <input
                 name="fullName"
                 required
+                autoComplete="name"
                 className="w-full rounded-xl border border-white/15 bg-ink/40 px-3 py-3 outline-none focus:ring-2 focus:ring-teal/40"
               />
             </label>
@@ -86,6 +95,43 @@ export function SignupScreen() {
               <span className="mb-1.5 block text-stone/70">Phone</span>
               <input
                 name="phone"
+                autoComplete="tel"
+                className="w-full rounded-xl border border-white/15 bg-ink/40 px-3 py-3 outline-none focus:ring-2 focus:ring-teal/40"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1.5 block text-stone/70">Password</span>
+              <div className="relative">
+                <input
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  className="w-full rounded-xl border border-white/15 bg-ink/40 px-3 py-3 pr-11 outline-none focus:ring-2 focus:ring-teal/40"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute inset-y-0 right-0 flex items-center px-3 text-stone/55 hover:text-stone"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1.5 block text-stone/70">Confirm password</span>
+              <input
+                name="confirmPassword"
+                type={showPassword ? "text" : "password"}
+                required
+                minLength={8}
+                autoComplete="new-password"
                 className="w-full rounded-xl border border-white/15 bg-ink/40 px-3 py-3 outline-none focus:ring-2 focus:ring-teal/40"
               />
             </label>
@@ -105,7 +151,7 @@ export function SignupScreen() {
           ) : null}
 
           <p className="mt-6 text-center text-sm text-stone/65">
-            Already approved?{" "}
+            Already have an account?{" "}
             <Link href="/login" className="font-medium text-gold underline">
               Sign in
             </Link>

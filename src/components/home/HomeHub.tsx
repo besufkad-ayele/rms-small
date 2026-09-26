@@ -15,7 +15,6 @@ import {
 import { useAuth } from "@/components/auth/AuthProvider";
 import { getSpendDashboard, type SpendDashboard } from "@/lib/cloud-bills";
 import {
-  seedOrgCatalog,
   summarizeInventory,
   type InventoryDashboard,
 } from "@/lib/cloud-catalog";
@@ -34,9 +33,6 @@ export function HomeHub() {
     if (!tenant) return;
     void (async () => {
       try {
-        if (hasFeature("inventory") || hasFeature("menu") || hasFeature("order")) {
-          await seedOrgCatalog(tenant.organization.id);
-        }
         if (hasFeature("inventory")) {
           const items = await loadInventoryResilient(tenant.organization.id);
           setInventory(summarizeInventory(items));

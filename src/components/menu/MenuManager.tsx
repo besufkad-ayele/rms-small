@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import {
   type CloudInventoryItem,
@@ -14,6 +15,12 @@ import {
   upsertMenuResilient,
 } from "@/lib/offline/resilient";
 import { MENU_CATEGORIES, categoryLabel } from "@/lib/menu-categories";
+import {
+  MENU_TAGS,
+  normalizeTags,
+  sortMenuByTags,
+  tagLabel,
+} from "@/lib/menu-tags";
 import type { MenuCategory } from "@/lib/tenant";
 import { cn, formatMoney } from "@/lib/utils";
 
@@ -23,19 +30,24 @@ export function MenuManager() {
   const orgId = tenant!.organization.id;
   const [menu, setMenu] = useState<CloudMenuItem[]>([]);
   const [inventory, setInventory] = useState<CloudInventoryItem[]>([]);
-  const [filterCat, setFilterCat] = useState<MenuCategory | "all">("all");
+  const [search, setSearch] = useState("");
+  const [tagFilter, setTagFilter] = useState<string | "all">("all");
   const [editing, setEditing] = useState<CloudMenuItem | null>(null);
   const [name, setName] = useState("");
   const [category, setCategory] = useState<MenuCategory>("hot-drinks");
   const [price, setPrice] = useState(0);
   const [available, setAvailable] = useState(true);
   const [description, setDescription] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
+  const [customTag, setCustomTag] = useState("");
   const [recipe, setRecipe] = useState<
     { inventory_item_id: string; quantity_required: number }[]
   >([]);
   const [recipeInvId, setRecipeInvId] = useState("");
   const [recipeQty, setRecipeQty] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CloudMenuItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const reload = useCallback(async () => {
     const { menu: m, inventory: i } = await loadCatalogResilient(
@@ -54,9 +66,25 @@ export function MenuManager() {
   }, [reload]);
 
   const filtered = useMemo(() => {
-    if (filterCat === "all") return menu;
-    return menu.filter((m) => m.category === filterCat);
-  }, [menu, filterCat]);
+    const q = search.trim().toLowerCase();
+    let list = menu;
+    if (tagFilter !== "all") {
+      list = list.filter((m) => (m.tags || []).includes(tagFilter));
+    }
+    if (q) {
+      list = list.filter(
+        (m) =>
+          m.name.toLowerCase().includes(q) ||
+          categoryLabel(m.category).toLowerCase().includes(q) ||
+          (m.description || "").toLowerCase().includes(q) ||
+          (m.tags || []).some(
+            (t) =>
+              t.includes(q) || tagLabel(t).toLowerCase().includes(q),
+          ),
+      );
+    }
+    return sortMenuByTags(list);
+  }, [menu, search, tagFilter]);
 
   function reset() {
     setEditing(null);
@@ -65,6 +93,8 @@ export function MenuManager() {
     setPrice(0);
     setAvailable(true);
     setDescription("");
+    setTags([]);
+    setCustomTag("");
     setRecipe([]);
   }
 
@@ -75,7 +105,21 @@ export function MenuManager() {
     setPrice(item.price);
     setAvailable(item.available);
     setDescription(item.description || "");
+    setTags(normalizeTags(item.tags));
     setRecipe(item.recipe || []);
+  }
+
+  function toggleTag(id: string) {
+    setTags((prev) =>
+      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id],
+    );
+  }
+
+  function addCustomTag() {
+    const next = normalizeTags([customTag]);
+    if (!next.length) return;
+    setTags((prev) => normalizeTags([...prev, ...next]));
+    setCustomTag("");
   }
 
   async function onSubmit(e: FormEvent) {
@@ -87,6 +131,7 @@ export function MenuManager() {
       price: Number(price),
       available,
       description,
+      tags: normalizeTags(tags),
       recipe,
     });
     setMessage(
@@ -103,24 +148,21 @@ export function MenuManager() {
     await reload();
   }
 
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const r = await deleteMenuResilient(orgId, deleteTarget.id);
+      if (r.offlineQueued) await refreshPendingCount();
+      setDeleteTarget(null);
+      await reload();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        <Chip
-          active={filterCat === "all"}
-          label="All"
-          onClick={() => setFilterCat("all")}
-        />
-        {MENU_CATEGORIES.map((c) => (
-          <Chip
-            key={c.id}
-            active={filterCat === c.id}
-            label={c.label}
-            onClick={() => setFilterCat(c.id)}
-          />
-        ))}
-      </div>
-
       <div className="grid gap-4 lg:grid-cols-[1fr_1.1fr]">
         <section className="rounded-3xl border border-ink/8 bg-white/80 p-4 sm:p-5">
           <h2 className="font-display text-xl">
@@ -165,6 +207,73 @@ export function MenuManager() {
                 />
               </label>
             </div>
+
+            <div>
+              <p className="mb-1.5 text-sm text-ink/60">
+                Tags{" "}
+                <span className="text-ink/40">
+                  (starters sort to the top · traditional, spicy, …)
+                </span>
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {MENU_TAGS.map((t) => {
+                  const on = tags.includes(t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => toggleTag(t.id)}
+                      className={cn(
+                        "rounded-full px-2.5 py-1 text-xs font-medium transition",
+                        on
+                          ? "bg-teal text-white"
+                          : "bg-ink/5 text-ink/70 hover:bg-ink/10",
+                      )}
+                    >
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-2 flex gap-2">
+                <input
+                  className="field flex-1"
+                  placeholder="Custom tag (e.g. house-favorite)"
+                  value={customTag}
+                  onChange={(e) => setCustomTag(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addCustomTag();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={addCustomTag}
+                  className="rounded-xl bg-ink px-3 text-sm text-stone"
+                >
+                  Add
+                </button>
+              </div>
+              {tags.some((t) => !MENU_TAGS.some((p) => p.id === t)) ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {tags
+                    .filter((t) => !MENU_TAGS.some((p) => p.id === t))
+                    .map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => toggleTag(t)}
+                        className="rounded-full bg-gold/25 px-2.5 py-1 text-xs font-medium text-ink"
+                      >
+                        {tagLabel(t)} ×
+                      </button>
+                    ))}
+                </div>
+              ) : null}
+            </div>
+
             <label className="block text-sm">
               <span className="mb-1 block text-ink/60">Details</span>
               <textarea
@@ -193,7 +302,7 @@ export function MenuManager() {
                   <option value="">Ingredient…</option>
                   {inventory.map((i) => (
                     <option key={i.id} value={i.id}>
-                      {i.name}
+                      {i.name} ({i.unit})
                     </option>
                   ))}
                 </select>
@@ -233,7 +342,7 @@ export function MenuManager() {
                       className="flex justify-between rounded-lg bg-white px-2 py-1"
                     >
                       <span>
-                        {inv?.name} — {r.quantity_required}
+                        {inv?.name} — {r.quantity_required} {inv?.unit}
                       </span>
                       <button
                         type="button"
@@ -275,10 +384,51 @@ export function MenuManager() {
         </section>
 
         <section className="rounded-3xl border border-ink/8 bg-white/80 p-4 sm:p-5">
-          <h2 className="font-display text-xl">
-            Menu ({filtered.length}
-            {filterCat !== "all" ? ` · ${categoryLabel(filterCat)}` : ""})
-          </h2>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="font-display text-xl">
+                Menu ({filtered.length}
+                {search.trim() || tagFilter !== "all" ? ` · filtered` : ""})
+              </h2>
+              <input
+                className="field sm:max-w-xs"
+                placeholder="Search menu…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => setTagFilter("all")}
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-xs font-medium",
+                  tagFilter === "all"
+                    ? "bg-ink text-stone"
+                    : "bg-ink/5 text-ink/65",
+                )}
+              >
+                All tags
+              </button>
+              {MENU_TAGS.slice(0, 8).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() =>
+                    setTagFilter((prev) => (prev === t.id ? "all" : t.id))
+                  }
+                  className={cn(
+                    "rounded-full px-2.5 py-1 text-xs font-medium",
+                    tagFilter === t.id
+                      ? "bg-teal text-white"
+                      : "bg-ink/5 text-ink/65",
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <ul className="mt-4 space-y-2">
             {filtered.map((item) => (
               <li
@@ -291,6 +441,21 @@ export function MenuManager() {
                     <span className="rounded-full bg-ink/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink/55">
                       {categoryLabel(item.category)}
                     </span>
+                    {(item.tags || []).map((t) => (
+                      <span
+                        key={t}
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                          t === "starters"
+                            ? "bg-teal/15 text-teal"
+                            : t === "traditional"
+                              ? "bg-gold/25 text-ink"
+                              : "bg-ink/5 text-ink/60",
+                        )}
+                      >
+                        {tagLabel(t)}
+                      </span>
+                    ))}
                   </div>
                   {item.description ? (
                     <p className="mt-1 text-xs text-ink/60">{item.description}</p>
@@ -313,12 +478,7 @@ export function MenuManager() {
                 <button
                   type="button"
                   className="rounded-lg border border-coral/20 bg-coral/10 p-2 text-coral"
-                  onClick={() =>
-                    void deleteMenuResilient(orgId, item.id).then(async (r) => {
-                      if (r.offlineQueued) await refreshPendingCount();
-                      await reload();
-                    })
-                  }
+                  onClick={() => setDeleteTarget(item)}
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -326,35 +486,25 @@ export function MenuManager() {
             ))}
             {filtered.length === 0 ? (
               <p className="py-8 text-center text-sm text-ink/50">
-                No items in this category yet.
+                {menu.length === 0
+                  ? "No menu items yet — add your first above."
+                  : "No items match your search."}
               </p>
             ) : null}
           </ul>
         </section>
       </div>
-    </div>
-  );
-}
 
-function Chip({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-full px-3 py-1.5 text-xs font-medium transition",
-        active ? "bg-teal text-white" : "bg-ink/5 text-ink/70 hover:bg-ink/10",
-      )}
-    >
-      {label}
-    </button>
+      <ConfirmDeleteDialog
+        open={Boolean(deleteTarget)}
+        title={
+          deleteTarget ? `Delete “${deleteTarget.name}”?` : "Delete permanently?"
+        }
+        message="This will be permanently deleted. Are you sure?"
+        busy={deleting}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => void confirmDelete()}
+      />
+    </div>
   );
 }

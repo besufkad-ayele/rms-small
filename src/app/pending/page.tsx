@@ -3,11 +3,29 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { APP_MODULE_LABELS, moduleFlag, type AppModule } from "@/lib/tenant";
 import { formatDateTime } from "@/lib/utils";
 
+const MODULES: AppModule[] = [
+  "menu",
+  "ordering",
+  "inventory",
+  "finance",
+  "hr",
+];
+
 export default function PendingPage() {
-  const { ready, user, tenant, awaitingVerification, logout, refresh } =
-    useAuth();
+  const {
+    ready,
+    user,
+    tenant,
+    hasMembership,
+    tenantError,
+    awaitingVerification,
+    needsOnboarding,
+    logout,
+    refresh,
+  } = useAuth();
   const router = useRouter();
   const [details, setDetails] = useState<Record<string, string> | null>(null);
 
@@ -17,15 +35,27 @@ export default function PendingPage() {
       router.replace("/login");
       return;
     }
-    if (!tenant) {
+    if (tenantError && !tenant) return;
+    if (needsOnboarding) {
       router.replace("/onboarding");
       return;
     }
-    // After approval: force login with the password Aramis sent
+    if (!tenant && hasMembership) return;
+    if (!tenant) return;
+    // Approved — keep session and open the app (same password from signup)
     if (!awaitingVerification) {
-      void logout().then(() => router.replace("/login?approved=1"));
+      router.replace("/app");
     }
-  }, [ready, user, tenant, awaitingVerification, logout, router]);
+  }, [
+    ready,
+    user,
+    tenant,
+    hasMembership,
+    tenantError,
+    awaitingVerification,
+    needsOnboarding,
+    router,
+  ]);
 
   useEffect(() => {
     if (!tenant) return;
@@ -36,13 +66,12 @@ export default function PendingPage() {
       Business: tenant.organization.name,
       Type: tenant.organization.org_type,
       City: tenant.organization.city || "—",
+      TIN: tenant.organization.tin || "—",
+      VAT: tenant.organization.vat_number || "—",
       Status: tenant.organization.verification_status || "pending",
-      Modules: [
-        tenant.subscription.inventory_enabled ? "Inventory" : null,
-        tenant.subscription.finance_enabled ? "Finance" : null,
-      ]
-        .filter(Boolean)
-        .join(" + "),
+      Modules: MODULES.filter((m) => moduleFlag(tenant.subscription, m))
+        .map((m) => APP_MODULE_LABELS[m])
+        .join(" · "),
       Submitted: formatDateTime(tenant.organization.created_at),
     });
   }, [tenant]);
@@ -52,14 +81,34 @@ export default function PendingPage() {
     return () => window.clearInterval(id);
   }, [refresh]);
 
-  if (!ready || !awaitingVerification) {
+  if (ready && tenantError && !tenant) {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-stone px-4 text-center">
+        <p className="font-display text-xl text-ink">Couldn’t load status</p>
+        <p className="max-w-sm text-sm text-ink/60">{tenantError}</p>
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          className="rounded-xl bg-teal px-5 py-2.5 text-sm font-semibold text-white"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (!ready || !tenant) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-stone">
-        <p className="text-sm text-ink/60">
-          {!awaitingVerification
-            ? "Approved — redirecting to sign in…"
-            : "Checking status…"}
-        </p>
+        <p className="text-sm text-ink/60">Checking status…</p>
+      </div>
+    );
+  }
+
+  if (!awaitingVerification) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-stone">
+        <p className="text-sm text-ink/60">Approved — opening Aramis…</p>
       </div>
     );
   }
@@ -74,9 +123,8 @@ export default function PendingPage() {
           Waiting for access
         </h1>
         <p className="mt-2 text-center text-sm text-ink/60">
-          Your business is under review. When approved, you will receive a
-          password by email or SMS — then sign in at the login page to start
-          your 14-day trial.
+          Your business is under review. When Aramis approves, sign in with the
+          email and password you created — your 14-day trial starts then.
         </p>
 
         {details ? (

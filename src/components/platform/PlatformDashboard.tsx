@@ -1,92 +1,238 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   approveOrganizationAction,
   approvePaymentProofAction,
   getKycSignedUrlAction,
+  getPlatformOverviewAction,
   listPaymentProofsAction,
   listPlatformTenantsAction,
+  listPricingCatalogAction,
   rejectOrganizationAction,
   rejectPaymentProofAction,
-  resetSubscriberPasswordAction,
-  updateTenantSubscriptionAction,
   type PaymentProofRow,
+  type PlatformOverviewStats,
   type PlatformTenantRow,
 } from "@/app/platform/actions";
-import type { SubStatus } from "@/lib/tenant";
-import { cn, formatDateTime, formatMoney } from "@/lib/utils";
+import type { ModulePriceRow, PackageRow } from "@/lib/pricing";
+import { cn, formatDateTime } from "@/lib/utils";
+import { OnboardingSection } from "./OnboardingSection";
+import { OverviewSection } from "./OverviewSection";
+import { PackagesSection } from "./PackagesSection";
+import { PaymentsSection } from "./PaymentsSection";
+import { RestaurantDetail } from "./RestaurantDetail";
+import { SubscribersSection } from "./SubscribersSection";
+import {
+  flagsFromProof,
+  flagsFromSub,
+  fromDatetimeLocalValue,
+  SkeletonCards,
+  type ModuleState,
+  type PlatformSection,
+} from "./platform-ui";
 
-export function PlatformDashboard() {
+const NAV: Array<{
+  id: PlatformSection;
+  label: string;
+  badge?: "kyc" | "payments";
+}> = [
+  { id: "overview", label: "Overview" },
+  { id: "packages", label: "Packages & pricing" },
+  { id: "onboarding", label: "Onboarding / KYC", badge: "kyc" },
+  { id: "payments", label: "Payments", badge: "payments" },
+  { id: "subscribers", label: "Subscribers" },
+];
+
+export function PlatformDashboard({ onSignOut }: { onSignOut: () => void }) {
+  const [section, setSection] = useState<PlatformSection>("overview");
   const [tenants, setTenants] = useState<PlatformTenantRow[]>([]);
   const [proofs, setProofs] = useState<PaymentProofRow[]>([]);
-  const [tab, setTab] = useState<"onboarding" | "payments" | "subscribers">(
-    "onboarding",
-  );
-  const [filter, setFilter] = useState<"pending" | "approved" | "rejected" | "all">(
-    "pending",
-  );
+  const [packages, setPackages] = useState<PackageRow[]>([]);
+  const [modulePrices, setModulePrices] = useState<ModulePriceRow[]>([]);
+  const [stats, setStats] = useState<PlatformOverviewStats | null>(null);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const [mobileNav, setMobileNav] = useState(false);
+
+  const [filter, setFilter] = useState<
+    "pending" | "approved" | "rejected" | "all"
+  >("pending");
+  const [subscriberQuery, setSubscriberQuery] = useState("");
+  const [subStatusFilter, setSubStatusFilter] = useState("all");
+  const [verifyFilter, setVerifyFilter] = useState("all");
+  const [expiringOnly, setExpiringOnly] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [lastCreds, setLastCreds] = useState<{
     email: string;
     password: string;
   } | null>(null);
 
-  async function reload() {
-    const [t, p] = await Promise.all([
-      listPlatformTenantsAction(),
-      listPaymentProofsAction(),
-    ]);
+  const [approveMods, setApproveMods] = useState<Record<string, ModuleState>>(
+    {},
+  );
+  const [trialDaysByOrg, setTrialDaysByOrg] = useState<Record<string, number>>(
+    {},
+  );
+  const [trialMonthsByOrg, setTrialMonthsByOrg] = useState<
+    Record<string, number>
+  >({});
+  const [trialEndsByOrg, setTrialEndsByOrg] = useState<Record<string, string>>(
+    {},
+  );
+  const [followUpByOrg, setFollowUpByOrg] = useState<Record<string, string>>(
+    {},
+  );
+  const [followUpNoteByOrg, setFollowUpNoteByOrg] = useState<
+    Record<string, string>
+  >({});
+  const [proofMods, setProofMods] = useState<Record<string, ModuleState>>({});
+  const [proofMonths, setProofMonths] = useState<Record<string, number>>({});
+  const [proofPkg, setProofPkg] = useState<Record<string, string>>({});
+
+  const pendingKyc = useMemo(
+    () =>
+      tenants.filter((t) => t.organization.verification_status === "pending")
+        .length,
+    [tenants],
+  );
+  const pendingPayments = useMemo(
+    () => proofs.filter((p) => p.status === "pending").length,
+    [proofs],
+  );
+
+  const loadTenants = useCallback(async () => {
+    const t = await listPlatformTenantsAction();
     if ("error" in t) {
-      setError(t.error ?? "Failed to load subscribers");
+      setError(t.error ?? "Failed to load tenants");
       return;
     }
+    setTenants(t.tenants);
+    const nextApprove: Record<string, ModuleState> = {};
+    for (const row of t.tenants) {
+      nextApprove[String(row.organization.id)] = flagsFromSub(row.subscription);
+    }
+    setApproveMods(nextApprove);
+  }, []);
+
+  const loadProofs = useCallback(async () => {
+    const p = await listPaymentProofsAction();
     if ("error" in p) {
       setError(p.error ?? "Failed to load payments");
       return;
     }
-    setTenants(t.tenants);
     setProofs(p.proofs);
+    const nextProofMods: Record<string, ModuleState> = {};
+    const nextMonths: Record<string, number> = {};
+    const nextPkg: Record<string, string> = {};
+    for (const proof of p.proofs) {
+      nextProofMods[proof.id] = flagsFromProof(proof);
+      nextMonths[proof.id] = Number(proof.months_requested || 1);
+      nextPkg[proof.id] = String(proof.package_code || "");
+    }
+    setProofMods(nextProofMods);
+    setProofMonths(nextMonths);
+    setProofPkg(nextPkg);
+  }, []);
+
+  const loadCatalog = useCallback(async () => {
+    const c = await listPricingCatalogAction();
+    if ("error" in c) {
+      setError(c.error ?? "Failed to load packages");
+      return;
+    }
+    setPackages(c.packages);
+    setModulePrices(c.modulePrices);
+  }, []);
+
+  const loadOverview = useCallback(async () => {
+    const o = await getPlatformOverviewAction();
+    if ("error" in o) {
+      setError(o.error ?? "Failed to load overview");
+      return;
+    }
+    setStats(o.stats);
+  }, []);
+
+  const reloadAll = useCallback(async () => {
+    setLoading(true);
+    await Promise.all([
+      loadTenants(),
+      loadProofs(),
+      loadCatalog(),
+      loadOverview(),
+    ]);
+    setLoading(false);
+  }, [loadCatalog, loadOverview, loadProofs, loadTenants]);
+
+  useEffect(() => {
+    void reloadAll();
+  }, [reloadAll]);
+
+  function go(sectionId: PlatformSection) {
+    setSection(sectionId);
+    setMobileNav(false);
+    if (sectionId !== "detail") setSelectedOrgId(null);
+  }
+
+  function openDetail(orgId: string) {
+    setSelectedOrgId(orgId);
+    setSection("detail");
+    setMobileNav(false);
+  }
+
+  const selectedTenant = useMemo(
+    () =>
+      selectedOrgId
+        ? tenants.find((t) => String(t.organization.id) === selectedOrgId) ||
+          null
+        : null,
+    [selectedOrgId, tenants],
+  );
+
+  const orgProofs = useMemo(() => {
+    if (!selectedOrgId) return [];
+    return proofs.filter((p) => p.organization_id === selectedOrgId);
+  }, [proofs, selectedOrgId]);
+
+  async function flashOk(msg: string) {
+    setMessage(msg);
     setError(null);
   }
 
-  useEffect(() => {
-    void reload();
-  }, []);
-
-  const filteredOnboarding = useMemo(() => {
-    if (filter === "all") return tenants;
-    return tenants.filter(
-      (row) => String(row.organization.verification_status || "pending") === filter,
-    );
-  }, [tenants, filter]);
-
-  const pendingCount = tenants.filter(
-    (t) => t.organization.verification_status === "pending",
-  ).length;
-  const pendingPayments = proofs.filter((p) => p.status === "pending").length;
-
   async function approveOrg(row: PlatformTenantRow) {
+    const orgId = String(row.organization.id);
+    const mods = approveMods[orgId] ?? flagsFromSub(row.subscription);
     setBusy(true);
-    setMessage(null);
     setLastCreds(null);
     const res = await approveOrganizationAction({
-      organizationId: String(row.organization.id),
+      organizationId: orgId,
+      trialDays: trialDaysByOrg[orgId] ?? 14,
+      trialMonths: trialMonthsByOrg[orgId] || undefined,
+      trialEndsAt: fromDatetimeLocalValue(trialEndsByOrg[orgId] || ""),
+      menuEnabled: mods.menu,
+      orderingEnabled: mods.ordering,
+      inventoryEnabled: mods.inventory,
+      financeEnabled: mods.finance,
+      hrEnabled: mods.hr,
+      followUpAt: fromDatetimeLocalValue(followUpByOrg[orgId] || ""),
+      followUpNote: followUpNoteByOrg[orgId] || undefined,
     });
     setBusy(false);
     if ("error" in res) {
-      setError(res.error ?? "Approve failed");
+      setError(String(res.error ?? "Approve failed"));
       return;
     }
     if (res.email && res.password) {
       setLastCreds({ email: res.email, password: res.password });
     }
-    setMessage(
-      `Approved ${row.organization.name}. Copy the password and send by email/SMS — they sign in at /login.`,
+    await flashOk(
+      `Approved ${row.organization.name}. Send password — they sign in at /login.`,
     );
-    await reload();
+    await Promise.all([loadTenants(), loadOverview()]);
   }
 
   async function rejectOrg(row: PlatformTenantRow) {
@@ -98,35 +244,38 @@ export function PlatformDashboard() {
     });
     setBusy(false);
     if ("error" in res) {
-      setError(res.error ?? "Reject failed");
+      setError(String(res.error ?? "Reject failed"));
       return;
     }
-    setMessage(`Rejected ${row.organization.name}`);
-    await reload();
+    await flashOk(`Rejected ${row.organization.name}`);
+    await Promise.all([loadTenants(), loadOverview()]);
   }
 
   async function approveProof(proof: PaymentProofRow) {
+    const mods = proofMods[proof.id] ?? flagsFromProof(proof);
+    const months = proofMonths[proof.id] ?? Number(proof.months_requested || 1);
+    const notes = window.prompt("Verification notes (optional)") || undefined;
     setBusy(true);
-    setMessage(null);
-    const months = Number(
-      window.prompt(
-        "Months to add",
-        String(proof.months_requested || 1),
-      ) || proof.months_requested || 1,
-    );
     const res = await approvePaymentProofAction({
       proofId: proof.id,
       months,
+      notes,
+      menuEnabled: mods.menu,
+      orderingEnabled: mods.ordering,
+      inventoryEnabled: mods.inventory,
+      financeEnabled: mods.finance,
+      hrEnabled: mods.hr,
+      packageCode: proofPkg[proof.id] || null,
     });
     setBusy(false);
     if ("error" in res) {
-      setError(res.error ?? "Approve failed");
+      setError(String(res.error ?? "Approve failed"));
       return;
     }
-    setMessage(
+    await flashOk(
       `Payment approved · +${res.months} month(s) · ends ${formatDateTime(res.periodEnd)}`,
     );
-    await reload();
+    await Promise.all([loadProofs(), loadTenants(), loadOverview()]);
   }
 
   async function rejectProof(proof: PaymentProofRow) {
@@ -138,435 +287,360 @@ export function PlatformDashboard() {
     });
     setBusy(false);
     if ("error" in res) {
-      setError(res.error ?? "Reject failed");
+      setError(String(res.error ?? "Reject failed"));
       return;
     }
-    setMessage("Payment proof rejected");
-    await reload();
+    await flashOk("Payment proof rejected");
+    await Promise.all([loadProofs(), loadOverview()]);
   }
 
   async function openDoc(path: string | null | undefined) {
     if (!path) return;
     const res = await getKycSignedUrlAction(path);
     if ("error" in res) {
-      setError(res.error ?? "Could not open file");
+      setError(String(res.error ?? "Could not open file"));
       return;
     }
     window.open(res.url, "_blank");
   }
 
-  async function resetPassword(orgId: string) {
-    setBusy(true);
-    const res = await resetSubscriberPasswordAction(orgId);
-    setBusy(false);
-    if ("error" in res) {
-      setError(res.error ?? "Reset failed");
-      return;
-    }
-    setLastCreds({
-      email: res.email || "",
-      password: res.password,
+  const filteredOnboarding = useMemo(() => {
+    if (filter === "all") return tenants;
+    return tenants.filter(
+      (row) =>
+        String(row.organization.verification_status || "pending") === filter,
+    );
+  }, [tenants, filter]);
+
+  const filteredSubscribers = useMemo(() => {
+    const q = subscriberQuery.trim().toLowerCase();
+    const now = Date.now();
+    const tenDays = 10 * 24 * 60 * 60 * 1000;
+    return tenants.filter((row) => {
+      const org = row.organization;
+      const sub = row.subscription;
+      if (
+        verifyFilter !== "all" &&
+        String(org.verification_status || "pending") !== verifyFilter
+      ) {
+        return false;
+      }
+      if (
+        subStatusFilter !== "all" &&
+        String(sub?.status || "") !== subStatusFilter
+      ) {
+        return false;
+      }
+      if (expiringOnly && sub) {
+        const end =
+          sub.status === "trialing"
+            ? sub.trial_ends_at
+            : sub.current_period_end;
+        if (!end) return false;
+        const ms = new Date(String(end)).getTime();
+        if (!(ms > now && ms - now <= tenDays)) return false;
+      }
+      if (!q) return true;
+      const hay = [
+        org.name,
+        org.email,
+        org.phone,
+        org.city,
+        org.tin,
+        row.owner?.full_name,
+        row.owner?.email,
+        row.ownerAuthEmail,
+        row.subscription?.status,
+        row.subscription?.plan_code,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
     });
-    setMessage("Password reset — send only if they forgot theirs.");
-  }
+  }, [
+    tenants,
+    subscriberQuery,
+    subStatusFilter,
+    verifyFilter,
+    expiringOnly,
+  ]);
+
+  const sortedProofs = useMemo(() => {
+    return [...proofs].sort((a, b) => {
+      if (a.status === "pending" && b.status !== "pending") return -1;
+      if (b.status === "pending" && a.status !== "pending") return 1;
+      return (
+        new Date(String(b.created_at || 0)).getTime() -
+        new Date(String(a.created_at || 0)).getTime()
+      );
+    });
+  }, [proofs]);
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-3xl border border-ink/8 bg-gradient-to-br from-ink to-teal/90 p-5 text-stone sm:p-7">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gold/80">
-          Aramis Product · Owner
-        </p>
-        <h1 className="mt-2 font-display text-3xl text-gold sm:text-4xl">
-          Subscriber console
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-stone/75">
-          Users create an account (no password), then onboard. You approve, copy
-          the login password to send them, and their 14-day trial starts.
-        </p>
-        <div className="mt-5 grid grid-cols-3 gap-3 sm:max-w-lg">
-          <div className="rounded-2xl bg-white/10 px-3 py-3">
-            <p className="text-xs text-stone/60">Pending onboarding</p>
-            <p className="mt-1 font-display text-2xl">{pendingCount}</p>
-          </div>
-          <div className="rounded-2xl bg-white/10 px-3 py-3">
-            <p className="text-xs text-stone/60">Payment requests</p>
-            <p className="mt-1 font-display text-2xl">{pendingPayments}</p>
-          </div>
-          <div className="rounded-2xl bg-white/10 px-3 py-3">
-            <p className="text-xs text-stone/60">Orgs</p>
-            <p className="mt-1 font-display text-2xl">{tenants.length}</p>
-          </div>
-        </div>
-      </section>
-
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => setTab("onboarding")}
-          className={cn(
-            "rounded-full px-4 py-2 text-sm font-medium",
-            tab === "onboarding" ? "bg-teal text-white" : "bg-ink/5",
-          )}
-        >
-          Onboarding
-          {pendingCount > 0 ? ` (${pendingCount})` : ""}
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("payments")}
-          className={cn(
-            "rounded-full px-4 py-2 text-sm font-medium",
-            tab === "payments" ? "bg-teal text-white" : "bg-ink/5",
-          )}
-        >
-          Payments
-          {pendingPayments > 0 ? ` (${pendingPayments})` : ""}
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("subscribers")}
-          className={cn(
-            "rounded-full px-4 py-2 text-sm font-medium",
-            tab === "subscribers" ? "bg-teal text-white" : "bg-ink/5",
-          )}
-        >
-          Subscribers
-        </button>
-      </div>
-
-      {lastCreds ? (
-        <div className="rounded-3xl border border-gold/40 bg-gold/15 p-4 text-sm">
-          <p className="font-semibold text-ink">
-            Send these login details by email or SMS
+    <div className="flex min-h-dvh bg-stone">
+      <aside className="sticky top-0 hidden h-dvh w-56 shrink-0 flex-col border-r border-ink/8 bg-white/80 px-3 py-4 backdrop-blur lg:flex">
+        <div className="px-2 pb-4">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-teal">
+            Aramis Product
           </p>
-          <p className="mt-2 font-mono text-xs sm:text-sm">
-            Email: <strong>{lastCreds.email}</strong>
-            <br />
-            Password: <strong>{lastCreds.password}</strong>
-            <br />
-            Login: /login
-          </p>
-          <button
-            type="button"
-            className="mt-3 rounded-lg bg-ink px-3 py-1.5 text-xs text-stone"
-            onClick={() =>
-              void navigator.clipboard.writeText(
-                `Aramis Product login\nEmail: ${lastCreds.email}\nPassword: ${lastCreds.password}\nURL: ${window.location.origin}/login`,
-              )
-            }
-          >
-            Copy for email / SMS
-          </button>
+          <p className="font-display text-lg text-ink">Owner</p>
         </div>
-      ) : null}
-
-      {message ? (
-        <p className="rounded-xl bg-teal/10 px-3 py-2 text-sm text-teal">{message}</p>
-      ) : null}
-      {error ? (
-        <p className="rounded-xl bg-coral/10 px-3 py-2 text-sm text-coral">{error}</p>
-      ) : null}
-
-      {tab === "onboarding" ? (
-        <>
-          <div className="flex flex-wrap gap-2">
-            {(["pending", "approved", "rejected", "all"] as const).map((f) => (
+        <nav className="flex flex-1 flex-col gap-1">
+          {NAV.map((item) => {
+            const badge =
+              item.badge === "kyc"
+                ? pendingKyc
+                : item.badge === "payments"
+                  ? pendingPayments
+                  : 0;
+            const active =
+              section === item.id ||
+              (item.id === "subscribers" && section === "detail");
+            return (
               <button
-                key={f}
+                key={item.id}
                 type="button"
-                onClick={() => setFilter(f)}
+                onClick={() => go(item.id)}
                 className={cn(
-                  "rounded-full px-3 py-1.5 text-xs font-medium capitalize",
-                  filter === f ? "bg-ink text-stone" : "bg-ink/5 text-ink/70",
+                  "flex items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-medium transition",
+                  active
+                    ? "bg-teal text-white"
+                    : "text-ink/75 hover:bg-stone",
                 )}
               >
-                {f}
-              </button>
-            ))}
-          </div>
-
-          <div className="grid gap-3">
-            {filteredOnboarding.map((row) => {
-              const org = row.organization;
-              const sub = row.subscription;
-              const status = String(org.verification_status || "pending");
-              return (
-                <article
-                  key={String(org.id)}
-                  className="rounded-3xl border border-ink/8 bg-white p-4 sm:p-5"
-                >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
-                    <div>
-                      <h2 className="font-display text-xl">{String(org.name)}</h2>
-                      <p className="text-sm text-ink/60">
-                        {row.owner?.full_name || "—"} · {String(org.org_type)} ·{" "}
-                        {String(org.city || "—")}
-                      </p>
-                      <p className="mt-1 text-xs text-ink/45">
-                        {formatDateTime(String(org.created_at))} ·{" "}
-                        <span className="capitalize">{status}</span>
-                      </p>
-                    </div>
-                    {status === "pending" ? (
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void approveOrg(row)}
-                          className="rounded-xl bg-teal px-3 py-2 text-xs font-semibold text-white"
-                        >
-                          Approve & start trial
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void rejectOrg(row)}
-                          className="rounded-xl border border-coral/30 bg-coral/10 px-3 py-2 text-xs font-semibold text-coral"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                    <Info
-                      label="Login email"
-                      value={String(row.ownerAuthEmail || org.email || "—")}
-                    />
-                    <Info
-                      label="Phone"
-                      value={String(row.owner?.phone || org.phone || "—")}
-                    />
-                    <Info label="Address" value={String(org.address || "—")} />
-                    <Info
-                      label="Location"
-                      value={`${org.city || "—"}, ${org.region || "—"}, ${org.country || ""}`}
-                    />
-                    <Info
-                      label="Modules"
-                      value={`${sub?.inventory_enabled ? "Inventory" : ""}${sub?.inventory_enabled && sub?.finance_enabled ? " + " : ""}${sub?.finance_enabled ? "Finance" : ""}`}
-                    />
-                    <Info
-                      label="Sub status"
-                      value={String(sub?.status || "—")}
-                    />
-                  </dl>
-                  <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                    <button
-                      type="button"
-                      className="rounded-lg bg-stone px-2 py-1 underline disabled:opacity-40"
-                      disabled={!org.business_license_url}
-                      onClick={() =>
-                        void openDoc(org.business_license_url as string)
-                      }
-                    >
-                      License {org.business_license_url ? "↗" : "(none)"}
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-lg bg-stone px-2 py-1 underline disabled:opacity-40"
-                      disabled={!org.id_document_url}
-                      onClick={() => void openDoc(org.id_document_url as string)}
-                    >
-                      ID {org.id_document_url ? "↗" : "(none)"}
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-            {filteredOnboarding.length === 0 ? (
-              <p className="rounded-3xl border border-dashed border-ink/15 py-12 text-center text-sm text-ink/50">
-                No onboarded businesses in this filter
-              </p>
-            ) : null}
-          </div>
-        </>
-      ) : tab === "payments" ? (
-        <div className="grid gap-3">
-          {proofs.map((proof) => (
-            <article
-              key={proof.id}
-              className="rounded-3xl border border-ink/8 bg-white p-4 sm:p-5"
-            >
-              <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
-                <div>
-                  <h2 className="font-display text-xl">
-                    {proof.organizations?.name || "Organization"}
-                  </h2>
-                  <p className="text-sm text-ink/60">
-                    {formatMoney(Number(proof.amount))} ·{" "}
-                    {Number(proof.months_requested || 1)} month(s) ·{" "}
-                    {String(proof.method)}
-                    {proof.reference ? ` · ref ${String(proof.reference)}` : ""}
-                  </p>
-                  <p className="mt-1 text-xs text-ink/45">
-                    {formatDateTime(String(proof.created_at))} ·{" "}
-                    <span className="capitalize">{proof.status}</span>
-                  </p>
-                </div>
-                {proof.status === "pending" ? (
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void approveProof(proof)}
-                      className="rounded-xl bg-teal px-3 py-2 text-xs font-semibold text-white"
-                    >
-                      Verify & extend
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void rejectProof(proof)}
-                      className="rounded-xl border border-coral/30 bg-coral/10 px-3 py-2 text-xs font-semibold text-coral"
-                    >
-                      Reject
-                    </button>
-                  </div>
+                <span>{item.label}</span>
+                {badge > 0 ? (
+                  <span
+                    className={cn(
+                      "rounded-full px-1.5 text-[10px] font-bold",
+                      active ? "bg-white/25" : "bg-coral/15 text-coral",
+                    )}
+                  >
+                    {badge}
+                  </span>
                 ) : null}
-              </div>
-              {proof.image_url ? (
-                <a
-                  href={String(proof.image_url)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-3 inline-block text-xs text-teal underline"
-                >
-                  Open proof image
-                </a>
-              ) : null}
-              {proof.notes ? (
-                <p className="mt-2 text-xs text-ink/55">{String(proof.notes)}</p>
-              ) : null}
-            </article>
-          ))}
-          {proofs.length === 0 ? (
-            <p className="rounded-3xl border border-dashed border-ink/15 py-12 text-center text-sm text-ink/50">
-              No payment requests yet
-            </p>
-          ) : null}
-        </div>
-      ) : (
-        <div className="grid gap-3">
-          {tenants.map((row) => {
-            const org = row.organization;
-            const sub = row.subscription;
-            return (
-              <article
-                key={String(org.id)}
-                className="rounded-3xl border border-ink/8 bg-white p-4 sm:p-5"
-              >
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <h2 className="font-display text-xl">{String(org.name)}</h2>
-                    <p className="text-sm text-ink/60">
-                      {row.ownerAuthEmail || row.owner?.email} ·{" "}
-                      {String(sub?.status)}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void resetPassword(String(org.id))}
-                    className="rounded-xl border border-ink/15 px-3 py-2 text-xs font-semibold"
-                  >
-                    Reset & show password
-                  </button>
-                </div>
-                <form
-                  className="mt-4 space-y-3 rounded-2xl bg-stone/50 p-4"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const fd = new FormData(e.currentTarget);
-                    void (async () => {
-                      setBusy(true);
-                      const res = await updateTenantSubscriptionAction({
-                        organizationId: String(org.id),
-                        status: String(fd.get("status")) as SubStatus,
-                        inventoryEnabled: fd.get("inventory") === "on",
-                        financeEnabled: fd.get("finance") === "on",
-                        trialDays: Number(fd.get("trialDays") || 14),
-                        periodMonths: Number(fd.get("periodMonths") || 1),
-                        notes: String(fd.get("notes") || ""),
-                      });
-                      setBusy(false);
-                      if ("error" in res) {
-                        setError(res.error ?? "Update failed");
-                        return;
-                      }
-                      setMessage("Subscription updated");
-                      await reload();
-                    })();
-                  }}
-                >
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="block text-sm">
-                      <span className="mb-1 block text-ink/60">Status</span>
-                      <select
-                        name="status"
-                        className="field"
-                        defaultValue={String(sub?.status || "expired")}
-                      >
-                        <option value="trialing">trialing</option>
-                        <option value="active">active</option>
-                        <option value="past_due">past_due</option>
-                        <option value="expired">expired</option>
-                        <option value="canceled">canceled</option>
-                      </select>
-                    </label>
-                    <label className="block text-sm">
-                      <span className="mb-1 block text-ink/60">Trial days</span>
-                      <input name="trialDays" type="number" defaultValue={14} className="field" />
-                    </label>
-                  </div>
-                  <div className="flex flex-wrap gap-4 text-sm">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        name="inventory"
-                        defaultChecked={Boolean(sub?.inventory_enabled)}
-                      />
-                      Inventory
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        name="finance"
-                        defaultChecked={Boolean(sub?.finance_enabled)}
-                      />
-                      Finance
-                    </label>
-                  </div>
-                  <input name="notes" className="field" placeholder="Notes" defaultValue={String(sub?.notes || "")} />
-                  <input type="hidden" name="periodMonths" value="1" />
-                  <button
-                    type="submit"
-                    disabled={busy}
-                    className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-stone"
-                  >
-                    Save subscription
-                  </button>
-                </form>
-              </article>
+              </button>
             );
           })}
-          {tenants.length === 0 ? (
-            <p className="rounded-3xl border border-dashed border-ink/15 py-12 text-center text-sm text-ink/50">
-              No subscribers yet — approve an application first
+        </nav>
+        <button
+          type="button"
+          onClick={onSignOut}
+          className="mt-3 rounded-xl border border-ink/10 px-3 py-2 text-xs font-medium text-ink/70"
+        >
+          Sign out
+        </button>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-20 border-b border-ink/8 bg-stone/90 px-3 py-3 backdrop-blur sm:px-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 lg:hidden">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-teal">
+                Aramis Product · Owner
+              </p>
+              <button
+                type="button"
+                onClick={() => setMobileNav((v) => !v)}
+                className="mt-1 flex items-center gap-2 font-display text-lg"
+              >
+                {NAV.find((n) => n.id === section)?.label ||
+                  (section === "detail" ? "Restaurant" : "Menu")}
+                <span className="text-xs text-ink/40">▾</span>
+              </button>
+            </div>
+            <div className="hidden lg:block">
+              <h1 className="font-display text-xl text-ink">
+                {section === "detail"
+                  ? String(selectedTenant?.organization.name || "Restaurant")
+                  : NAV.find((n) => n.id === section)?.label}
+              </h1>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={busy || loading}
+                onClick={() => void reloadAll()}
+                className="rounded-xl border border-ink/12 px-3 py-1.5 text-xs font-medium"
+              >
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="rounded-xl border border-ink/12 px-3 py-1.5 text-xs font-medium lg:hidden"
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
+          {mobileNav ? (
+            <div className="mt-2 grid gap-1 rounded-2xl border border-ink/8 bg-white p-2 lg:hidden">
+              {NAV.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => go(item.id)}
+                  className={cn(
+                    "rounded-xl px-3 py-2 text-left text-sm",
+                    section === item.id ? "bg-teal text-white" : "hover:bg-stone",
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </header>
+
+        <main className="flex-1 px-3 py-4 sm:px-5">
+          {lastCreds ? (
+            <div className="mb-4 rounded-3xl border border-gold/40 bg-gold/15 p-4 text-sm">
+              <p className="font-semibold text-ink">
+                Send these login details by email or SMS
+              </p>
+              <p className="mt-2 font-mono text-xs sm:text-sm">
+                Email: <strong>{lastCreds.email}</strong>
+                <br />
+                Password: <strong>{lastCreds.password}</strong>
+                <br />
+                Login: /login
+              </p>
+              <button
+                type="button"
+                className="mt-3 rounded-lg bg-ink px-3 py-1.5 text-xs text-stone"
+                onClick={() =>
+                  void navigator.clipboard.writeText(
+                    `Aramis Product login\nEmail: ${lastCreds.email}\nPassword: ${lastCreds.password}\nURL: ${window.location.origin}/login`,
+                  )
+                }
+              >
+                Copy for email / SMS
+              </button>
+            </div>
+          ) : null}
+          {message ? (
+            <p className="mb-3 rounded-xl bg-teal/10 px-3 py-2 text-sm text-teal">
+              {message}
             </p>
           ) : null}
-        </div>
-      )}
-    </div>
-  );
-}
+          {error ? (
+            <p className="mb-3 rounded-xl bg-coral/10 px-3 py-2 text-sm text-coral">
+              {error}
+            </p>
+          ) : null}
 
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl bg-stone/50 px-3 py-2">
-      <dt className="text-[11px] text-ink/50">{label}</dt>
-      <dd className="mt-0.5 break-words font-medium">{value || "—"}</dd>
+          {loading && !stats && section === "overview" ? (
+            <SkeletonCards count={4} />
+          ) : null}
+
+          {section === "overview" && stats ? (
+            <OverviewSection
+              stats={stats}
+              onOpenKyc={() => go("onboarding")}
+              onOpenPayments={() => go("payments")}
+              onOpenOrg={openDetail}
+            />
+          ) : null}
+
+          {section === "packages" ? (
+            <PackagesSection
+              packages={packages}
+              modulePrices={modulePrices}
+              busy={busy}
+              setBusy={setBusy}
+              setError={setError}
+              onSaved={async () => {
+                await flashOk("Pricing saved");
+                await loadCatalog();
+              }}
+            />
+          ) : null}
+
+          {section === "onboarding" ? (
+            <OnboardingSection
+              rows={filteredOnboarding}
+              filter={filter}
+              setFilter={setFilter}
+              approveMods={approveMods}
+              setApproveMods={setApproveMods}
+              trialDaysByOrg={trialDaysByOrg}
+              setTrialDaysByOrg={setTrialDaysByOrg}
+              trialMonthsByOrg={trialMonthsByOrg}
+              setTrialMonthsByOrg={setTrialMonthsByOrg}
+              trialEndsByOrg={trialEndsByOrg}
+              setTrialEndsByOrg={setTrialEndsByOrg}
+              followUpByOrg={followUpByOrg}
+              setFollowUpByOrg={setFollowUpByOrg}
+              followUpNoteByOrg={followUpNoteByOrg}
+              setFollowUpNoteByOrg={setFollowUpNoteByOrg}
+              busy={busy}
+              onApprove={(r) => void approveOrg(r)}
+              onReject={(r) => void rejectOrg(r)}
+              onOpenDoc={(p) => void openDoc(p)}
+              onOpenDetail={openDetail}
+            />
+          ) : null}
+
+          {section === "payments" ? (
+            <PaymentsSection
+              proofs={sortedProofs}
+              packages={packages}
+              proofMods={proofMods}
+              setProofMods={setProofMods}
+              proofMonths={proofMonths}
+              setProofMonths={setProofMonths}
+              proofPkg={proofPkg}
+              setProofPkg={setProofPkg}
+              busy={busy}
+              onApprove={(p) => void approveProof(p)}
+              onReject={(p) => void rejectProof(p)}
+              onOpenOrg={openDetail}
+            />
+          ) : null}
+
+          {section === "subscribers" ? (
+            <SubscribersSection
+              rows={filteredSubscribers}
+              query={subscriberQuery}
+              setQuery={setSubscriberQuery}
+              verifyFilter={verifyFilter}
+              setVerifyFilter={setVerifyFilter}
+              subStatusFilter={subStatusFilter}
+              setSubStatusFilter={setSubStatusFilter}
+              expiringOnly={expiringOnly}
+              setExpiringOnly={setExpiringOnly}
+              onOpen={openDetail}
+            />
+          ) : null}
+
+          {section === "detail" && selectedTenant ? (
+            <RestaurantDetail
+              row={selectedTenant}
+              proofs={orgProofs}
+              packages={packages}
+              busy={busy}
+              setBusy={setBusy}
+              setError={setError}
+              flashOk={flashOk}
+              onBack={() => go("subscribers")}
+              onOpenDoc={(p) => void openDoc(p)}
+              onReload={async () => {
+                await Promise.all([
+                  loadTenants(),
+                  loadProofs(),
+                  loadOverview(),
+                ]);
+              }}
+            />
+          ) : null}
+
+          {section === "detail" && !selectedTenant && !loading ? (
+            <p className="text-sm text-ink/50">Restaurant not found.</p>
+          ) : null}
+        </main>
+      </div>
     </div>
   );
 }

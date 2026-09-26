@@ -3,16 +3,24 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, History, Package, Pencil, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import {
+  seedOrgCatalog,
   summarizeInventory,
   type CloudInventoryItem,
 } from "@/lib/cloud-catalog";
+import {
+  createCustomUnit,
+  groupUnitsByKind,
+  listOrgUnits,
+} from "@/lib/inventory-units";
 import {
   deleteInventoryResilient,
   loadInventoryResilient,
   upsertInventoryResilient,
 } from "@/lib/offline/resilient";
 import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
+import type { InventoryUnit } from "@/lib/tenant";
 import { cn, formatMoney } from "@/lib/utils";
 
 export function InventoryManager() {
@@ -20,18 +28,40 @@ export function InventoryManager() {
   const { refreshPendingCount } = useOfflineSync();
   const orgId = tenant!.organization.id;
   const [items, setItems] = useState<CloudInventoryItem[]>([]);
+  const [units, setUnits] = useState<InventoryUnit[]>([]);
   const [editing, setEditing] = useState<CloudInventoryItem | null>(null);
   const [form, setForm] = useState({
     name: "",
     unit: "kg",
+    unit_id: "" as string,
     stock_qty: 0,
     low_stock_threshold: 1,
     cost_per_unit: 0,
   });
   const [historyFor, setHistoryFor] = useState<CloudInventoryItem | null>(null);
+  const [detailFor, setDetailFor] = useState<CloudInventoryItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CloudInventoryItem | null>(
+    null,
+  );
+  const [deleting, setDeleting] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customCode, setCustomCode] = useState("");
+  const [customLabel, setCustomLabel] = useState("");
+  const [seeding, setSeeding] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
-    setItems(await loadInventoryResilient(orgId, setItems));
+    const [inv, u] = await Promise.all([
+      loadInventoryResilient(orgId, setItems),
+      listOrgUnits(orgId),
+    ]);
+    setItems(inv);
+    setUnits(u);
+    setForm((f) => {
+      if (f.unit_id || !u.length) return f;
+      const kg = u.find((x) => x.code === "kg") || u[0];
+      return { ...f, unit_id: kg.id, unit: kg.code };
+    });
   }, [orgId]);
 
   useEffect(() => {
@@ -39,34 +69,96 @@ export function InventoryManager() {
   }, [reload]);
 
   const dash = useMemo(() => summarizeInventory(items), [items]);
+  const grouped = useMemo(() => groupUnitsByKind(units), [units]);
 
   function startEdit(item: CloudInventoryItem) {
     setEditing(item);
+    const match =
+      units.find((u) => u.id === item.unit_id) ||
+      units.find((u) => u.code.toLowerCase() === item.unit.toLowerCase());
     setForm({
       name: item.name,
-      unit: item.unit,
+      unit: match?.code || item.unit,
+      unit_id: match?.id || "",
       stock_qty: Number(item.stock_qty),
       low_stock_threshold: Number(item.low_stock_threshold),
       cost_per_unit: Number(item.cost_per_unit),
     });
   }
 
+  function pickUnit(unitId: string) {
+    const u = units.find((x) => x.id === unitId);
+    if (!u) return;
+    setForm((f) => ({ ...f, unit_id: u.id, unit: u.code }));
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    const unit =
+      units.find((u) => u.id === form.unit_id) ||
+      units.find((u) => u.code === form.unit);
     const { offlineQueued } = await upsertInventoryResilient(orgId, {
       id: editing?.id,
-      ...form,
+      name: form.name,
+      unit: unit?.code || form.unit,
+      unit_id: unit?.id || form.unit_id || null,
+      stock_qty: form.stock_qty,
+      low_stock_threshold: form.low_stock_threshold,
+      cost_per_unit: form.cost_per_unit,
     });
     setEditing(null);
+    const defaultUnit = units.find((x) => x.code === "kg") || units[0];
     setForm({
       name: "",
-      unit: "kg",
+      unit: defaultUnit?.code || "kg",
+      unit_id: defaultUnit?.id || "",
       stock_qty: 0,
       low_stock_threshold: 1,
       cost_per_unit: 0,
     });
     if (offlineQueued) await refreshPendingCount();
     await reload();
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const r = await deleteInventoryResilient(orgId, deleteTarget.id);
+      if (r.offlineQueued) await refreshPendingCount();
+      setDeleteTarget(null);
+      if (detailFor?.id === deleteTarget.id) setDetailFor(null);
+      await reload();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function addCustomUnit() {
+    if (!customCode.trim()) return;
+    const created = await createCustomUnit(orgId, {
+      code: customCode,
+      label: customLabel || customCode,
+    });
+    setUnits((prev) => [...prev, created]);
+    setForm((f) => ({ ...f, unit_id: created.id, unit: created.code }));
+    setCustomOpen(false);
+    setCustomCode("");
+    setCustomLabel("");
+  }
+
+  async function loadSample() {
+    setSeeding(true);
+    setMessage(null);
+    try {
+      await seedOrgCatalog(orgId);
+      setMessage("Sample menu & inventory loaded.");
+      await reload();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Could not load sample data");
+    } finally {
+      setSeeding(false);
+    }
   }
 
   return (
@@ -129,6 +221,26 @@ export function InventoryManager() {
         ) : null}
       </section>
 
+      {items.length === 0 ? (
+        <div className="rounded-3xl border border-dashed border-ink/15 bg-white/60 px-4 py-6 text-center">
+          <p className="text-sm text-ink/60">
+            Your inventory starts empty. Add items below, or load sample data
+            once.
+          </p>
+          <button
+            type="button"
+            disabled={seeding}
+            onClick={() => void loadSample()}
+            className="mt-3 rounded-xl border border-teal/30 bg-teal/10 px-4 py-2 text-sm font-medium text-teal disabled:opacity-60"
+          >
+            {seeding ? "Loading…" : "Load sample data"}
+          </button>
+          {message ? (
+            <p className="mt-2 text-xs text-teal">{message}</p>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="grid gap-4 lg:grid-cols-[1fr_1.15fr]">
         <section className="rounded-3xl border border-ink/8 bg-white/80 p-4 sm:p-5">
           <h2 className="font-display text-xl">
@@ -145,40 +257,96 @@ export function InventoryManager() {
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
-            <div className="grid grid-cols-2 gap-3">
-              <input
+            <div>
+              <label className="mb-1 block text-xs text-ink/55">Unit</label>
+              <select
                 required
                 className="field"
-                placeholder="Unit"
-                value={form.unit}
-                onChange={(e) => setForm({ ...form, unit: e.target.value })}
-              />
-              <input
-                required
-                type="number"
-                min={0}
-                step="0.001"
-                className="field"
-                value={form.stock_qty}
-                onChange={(e) =>
-                  setForm({ ...form, stock_qty: Number(e.target.value) })
-                }
-              />
+                value={form.unit_id}
+                onChange={(e) => pickUnit(e.target.value)}
+              >
+                <option value="">Select unit…</option>
+                {grouped.map((g) => (
+                  <optgroup key={g.kind} label={g.label}>
+                    {g.units.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.label} ({u.code})
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="mt-1.5 text-xs font-medium text-teal underline"
+                onClick={() => setCustomOpen((o) => !o)}
+              >
+                {customOpen ? "Cancel custom unit" : "Add custom unit"}
+              </button>
+              {customOpen ? (
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <input
+                    className="field"
+                    placeholder="Code (e.g. sack)"
+                    value={customCode}
+                    onChange={(e) => setCustomCode(e.target.value)}
+                  />
+                  <input
+                    className="field"
+                    placeholder="Label"
+                    value={customLabel}
+                    onChange={(e) => setCustomLabel(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void addCustomUnit()}
+                    className="col-span-2 rounded-xl bg-ink py-2 text-sm text-stone"
+                  >
+                    Save unit
+                  </button>
+                </div>
+              ) : null}
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <input
-                type="number"
-                min={0}
-                step="0.001"
-                className="field"
-                value={form.low_stock_threshold}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    low_stock_threshold: Number(e.target.value),
-                  })
-                }
-              />
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs text-ink/55">
+                  Stock qty
+                </span>
+                <input
+                  required
+                  type="number"
+                  min={0}
+                  step="0.001"
+                  className="field"
+                  value={form.stock_qty}
+                  onChange={(e) =>
+                    setForm({ ...form, stock_qty: Number(e.target.value) })
+                  }
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs text-ink/55">
+                  Low-stock alert
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.001"
+                  className="field"
+                  value={form.low_stock_threshold}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      low_stock_threshold: Number(e.target.value),
+                    })
+                  }
+                />
+              </label>
+            </div>
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs text-ink/55">
+                Cost per {form.unit || "unit"} (ETB)
+              </span>
               <input
                 required
                 type="number"
@@ -190,13 +358,22 @@ export function InventoryManager() {
                   setForm({ ...form, cost_per_unit: Number(e.target.value) })
                 }
               />
-            </div>
+            </label>
             <button
               type="submit"
               className="w-full rounded-xl bg-teal py-3 text-sm font-semibold text-white"
             >
               {editing ? "Save" : "Add item"}
             </button>
+            {editing ? (
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="w-full text-sm text-teal underline"
+              >
+                Cancel edit
+              </button>
+            ) : null}
           </form>
         </section>
 
@@ -217,14 +394,18 @@ export function InventoryManager() {
                   )}
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="min-w-0 flex-1">
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 text-left"
+                      onClick={() => setDetailFor(item)}
+                    >
                       <p className="font-medium">{item.name}</p>
                       <p className="text-xs text-ink/55">
                         {item.stock_qty} {item.unit} ·{" "}
-                        {formatMoney(Number(item.cost_per_unit))} · history{" "}
-                        {(item.cost_history || []).length}
+                        {formatMoney(Number(item.cost_per_unit))}/{item.unit} ·
+                        low ≤ {item.low_stock_threshold} {item.unit}
                       </p>
-                    </div>
+                    </button>
                     <button
                       type="button"
                       className="rounded-lg border border-ink/10 bg-white p-2"
@@ -242,13 +423,7 @@ export function InventoryManager() {
                     <button
                       type="button"
                       className="rounded-lg border border-coral/20 bg-coral/10 p-2 text-coral"
-                      onClick={() =>
-                        void deleteInventoryResilient(orgId, item.id)
-                          .then(async (r) => {
-                            if (r.offlineQueued) await refreshPendingCount();
-                            await reload();
-                          })
-                      }
+                      onClick={() => setDeleteTarget(item)}
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -256,9 +431,60 @@ export function InventoryManager() {
                 </li>
               );
             })}
+            {items.length === 0 ? (
+              <p className="py-8 text-center text-sm text-ink/50">
+                No inventory items yet.
+              </p>
+            ) : null}
           </ul>
         </section>
       </div>
+
+      {detailFor ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-4 sm:items-center">
+          <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-xl">
+            <h3 className="font-display text-lg">{detailFor.name}</h3>
+            <dl className="mt-3 grid gap-2 text-sm">
+              <div className="rounded-xl bg-stone/60 px-3 py-2">
+                <dt className="text-xs text-ink/50">Unit</dt>
+                <dd className="font-medium">{detailFor.unit}</dd>
+              </div>
+              <div className="rounded-xl bg-stone/60 px-3 py-2">
+                <dt className="text-xs text-ink/50">Stock</dt>
+                <dd className="font-medium">
+                  {detailFor.stock_qty} {detailFor.unit}
+                </dd>
+              </div>
+              <div className="rounded-xl bg-stone/60 px-3 py-2">
+                <dt className="text-xs text-ink/50">Cost per unit</dt>
+                <dd className="font-medium">
+                  {formatMoney(Number(detailFor.cost_per_unit))} /{" "}
+                  {detailFor.unit}
+                </dd>
+              </div>
+              <div className="rounded-xl bg-stone/60 px-3 py-2">
+                <dt className="text-xs text-ink/50">Low-stock threshold</dt>
+                <dd className="font-medium">
+                  {detailFor.low_stock_threshold} {detailFor.unit}
+                </dd>
+              </div>
+              <div className="rounded-xl bg-stone/60 px-3 py-2">
+                <dt className="text-xs text-ink/50">Cost history entries</dt>
+                <dd className="font-medium">
+                  {(detailFor.cost_history || []).length}
+                </dd>
+              </div>
+            </dl>
+            <button
+              type="button"
+              className="mt-4 w-full rounded-xl bg-ink py-2.5 text-sm text-stone"
+              onClick={() => setDetailFor(null)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {historyFor ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-4 sm:items-center">
@@ -283,6 +509,9 @@ export function InventoryManager() {
                   </span>
                 </li>
               ))}
+              {(historyFor.cost_history || []).length === 0 ? (
+                <p className="text-sm text-ink/50">No history yet.</p>
+              ) : null}
             </ul>
             <button
               type="button"
@@ -294,6 +523,19 @@ export function InventoryManager() {
           </div>
         </div>
       ) : null}
+
+      <ConfirmDeleteDialog
+        open={Boolean(deleteTarget)}
+        title={
+          deleteTarget
+            ? `Delete “${deleteTarget.name}”?`
+            : "Delete permanently?"
+        }
+        message="This will be permanently deleted. Are you sure?"
+        busy={deleting}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => void confirmDelete()}
+      />
     </div>
   );
 }

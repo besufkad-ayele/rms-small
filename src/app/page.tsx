@@ -14,36 +14,65 @@ export default function HomePage() {
     ready,
     user,
     tenant,
+    hasMembership,
+    tenantError,
     isPlatformAdmin,
     awaitingVerification,
     needsOnboarding,
+    accessBlocked,
+    refresh,
   } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
     if (!ready || !user) return;
-    if (isPlatformAdmin) {
+    if (isPlatformAdmin && !hasMembership) {
       router.replace("/platform");
       return;
     }
-    if (needsOnboarding || !tenant) {
+    if (tenantError && !tenant) return; // show retry
+    if (needsOnboarding) {
       router.replace("/onboarding");
       return;
     }
+    if (!tenant && hasMembership) return; // still loading / error
     if (awaitingVerification) {
       router.replace("/pending");
       return;
     }
-    router.replace("/app");
+    if (accessBlocked) {
+      router.replace("/app/billing");
+      return;
+    }
+    if (tenant) router.replace("/app");
   }, [
     ready,
     user,
     tenant,
+    hasMembership,
+    tenantError,
     isPlatformAdmin,
     awaitingVerification,
     needsOnboarding,
+    accessBlocked,
     router,
   ]);
+
+  if (ready && user && tenantError && !tenant) {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-ink px-4 text-center text-stone">
+        <p className="font-display text-xl text-gold">Couldn’t load account</p>
+        <p className="max-w-sm text-sm text-stone/70">{tenantError}</p>
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          className="rounded-xl bg-teal px-5 py-2.5 text-sm font-semibold text-white"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   // Signed-in users briefly see loading while we redirect
   if (ready && user) {

@@ -27,9 +27,9 @@ export function LoginScreen({
       return "Use the email and password your restaurant owner created for you.";
     }
     if (justApproved) {
-      return "Your account was approved. Sign in with the password Aramis sent you.";
+      return "Your account was approved. Sign in with the password you chose when you signed up.";
     }
-    return "Owners and staff sign in here with the credentials they were given.";
+    return "Owners and staff sign in here with the email and password from signup (or staff invite).";
   }, [justApproved, isStaff]);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -73,7 +73,7 @@ export function LoginScreen({
 
         {justApproved && !isStaff ? (
           <div className="mb-4 rounded-2xl border border-teal/40 bg-teal/15 px-4 py-3 text-center text-sm text-teal">
-            Access granted — enter the password you received to open Aramis.
+            Access granted — sign in with the password you created at signup.
           </div>
         ) : null}
 

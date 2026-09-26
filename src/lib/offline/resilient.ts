@@ -9,7 +9,6 @@ import {
   deleteMenu,
   listInventoryChangedSince,
   listMenuChangedSince,
-  seedOrgCatalog,
   upsertInventory,
   upsertMenu,
   type CloudInventoryItem,
@@ -77,10 +76,6 @@ export async function pullMenuChanges(
     (meta.lastFullPullAt
       ? Date.now() - new Date(meta.lastFullPullAt).getTime() > FULL_PULL_MAX_AGE_MS
       : true);
-
-  if (wantFull) {
-    await seedOrgCatalog(orgId).catch(() => undefined);
-  }
 
   const since = wantFull ? null : meta.menuPulledAt;
   const changed = await listMenuChangedSince(orgId, since);

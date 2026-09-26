@@ -30,11 +30,13 @@ export const STAFF_FEATURE_LABELS: Record<StaffFeature, string> = {
 /** Seat caps used for marketing packages. */
 export const PLAN_STAFF_SEATS: Record<string, number> = {
   aramis_starter: 2,
+  starter: 2,
   basic: 2,
   aramis_growth: 10,
+  growth: 10,
   aramis_medium: 10,
   medium: 10,
-  growth: 10,
+  full: 25,
   aramis_enterprise: 50,
   enterprise: 50,
 };

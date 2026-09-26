@@ -25,12 +25,15 @@ export function RequireAuth({
     ready,
     user,
     tenant,
+    hasMembership,
+    tenantError,
     needsOnboarding,
     awaitingVerification,
     accessBlocked,
     hasModule,
     hasFeature,
     isPlatformAdmin,
+    refresh,
   } = useAuth();
   const router = useRouter();
 
@@ -40,12 +43,16 @@ export function RequireAuth({
       router.replace("/login");
       return;
     }
-    if (isPlatformAdmin && !tenant) {
+    if (isPlatformAdmin && !tenant && !hasMembership) {
       router.replace("/platform");
       return;
     }
     if (needsOnboarding) {
       router.replace("/onboarding");
+      return;
+    }
+    if (tenantError && !tenant) {
+      // Stay — error UI below
       return;
     }
     if (awaitingVerification && !allowWhenBlocked) {
@@ -75,13 +82,47 @@ export function RequireAuth({
     module,
     feature,
     tenant,
+    hasMembership,
+    tenantError,
     hasModule,
     hasFeature,
     isPlatformAdmin,
     router,
   ]);
 
-  if (!ready || !user || needsOnboarding || !tenant) {
+  if (!ready || !user) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-stone text-ink">
+        <p className="text-sm text-ink/60">Loading Aramis…</p>
+      </div>
+    );
+  }
+
+  if (tenantError && !tenant) {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-stone px-4 text-center text-ink">
+        <p className="font-display text-xl">Couldn’t load your business</p>
+        <p className="max-w-sm text-sm text-ink/60">{tenantError}</p>
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          className="rounded-xl bg-teal px-5 py-2.5 text-sm font-semibold text-white"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (needsOnboarding) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-stone text-ink">
+        <p className="text-sm text-ink/60">Opening onboarding…</p>
+      </div>
+    );
+  }
+
+  if (!tenant) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-stone text-ink">
         <p className="text-sm text-ink/60">Loading Aramis…</p>

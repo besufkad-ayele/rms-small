@@ -41,7 +41,9 @@ export default function PlatformPage() {
   if (!allowed) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-stone px-4">
-        <p className="text-sm text-ink/70">Not authorized for Aramis platform admin.</p>
+        <p className="text-sm text-ink/70">
+          Not authorized for Aramis platform admin.
+        </p>
         <button
           type="button"
           className="rounded-xl bg-ink px-4 py-2 text-sm text-stone"
@@ -54,27 +56,8 @@ export default function PlatformPage() {
   }
 
   return (
-    <div className="min-h-dvh bg-stone">
-      <header className="sticky top-0 z-20 border-b border-ink/8 bg-stone/90 px-4 py-3 backdrop-blur sm:px-6">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-teal">
-              Aramis Product
-            </p>
-            <h1 className="font-display text-xl">Owner console</h1>
-          </div>
-          <button
-            type="button"
-            onClick={() => void logout().then(() => router.replace("/login"))}
-            className="rounded-xl border border-ink/15 px-3 py-2 text-sm"
-          >
-            Sign out
-          </button>
-        </div>
-      </header>
-      <main className="mx-auto max-w-6xl px-3 py-5 sm:px-6">
-        <PlatformDashboard />
-      </main>
-    </div>
+    <PlatformDashboard
+      onSignOut={() => void logout().then(() => router.replace("/login"))}
+    />
   );
 }

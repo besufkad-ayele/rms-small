@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
+import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import {
   BILL_CATEGORIES,
   type PaidBill,
@@ -26,6 +27,8 @@ export function PaidBillsPanel({
   const [bills, setBills] = useState<PaidBill[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<PaidBill | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const reload = useCallback(async () => {
     setBills(await loadPaidBillsResilient(orgId));
@@ -179,17 +182,7 @@ export function PaidBillsPanel({
                 type="button"
                 className="rounded-lg border border-coral/20 bg-coral/10 p-2 text-coral"
                 aria-label="Delete bill"
-                onClick={() =>
-                  void deletePaidBillResilient(orgId, b.id)
-                    .then(async (r) => {
-                      if (r.offlineQueued) await refreshPendingCount();
-                      await reload();
-                      onChanged?.();
-                    })
-                    .catch((e) =>
-                      setError(e instanceof Error ? e.message : "Delete failed"),
-                    )
-                }
+                onClick={() => setDeleteTarget(b)}
               >
                 <Trash2 className="h-4 w-4" />
               </button>
@@ -202,6 +195,33 @@ export function PaidBillsPanel({
           </p>
         ) : null}
       </ul>
+
+      <ConfirmDeleteDialog
+        open={Boolean(deleteTarget)}
+        title={
+          deleteTarget
+            ? `Delete “${deleteTarget.title}”?`
+            : "Delete permanently?"
+        }
+        message="This will be permanently deleted. Are you sure?"
+        busy={deleting}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          setDeleting(true);
+          void deletePaidBillResilient(orgId, deleteTarget.id)
+            .then(async (r) => {
+              if (r.offlineQueued) await refreshPendingCount();
+              setDeleteTarget(null);
+              await reload();
+              onChanged?.();
+            })
+            .catch((e) =>
+              setError(e instanceof Error ? e.message : "Delete failed"),
+            )
+            .finally(() => setDeleting(false));
+        }}
+      />
     </section>
   );
 }

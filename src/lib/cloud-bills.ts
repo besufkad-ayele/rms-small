@@ -39,10 +39,16 @@ export async function listPaidBills(orgId: string): Promise<PaidBill[]> {
 }
 
 import type { ReportPeriod } from "@/lib/types";
-import { dayKey, startOfMonth, startOfWeek, startOfYear } from "@/lib/utils";
+import {
+  defaultDateFilter,
+  resolveDateRange,
+  type DateFilterState,
+} from "@/lib/date-range";
+import { dayKey } from "@/lib/utils";
 
 export type SpendDashboard = {
   period: ReportPeriod;
+  rangeLabel: string;
   periodSpent: number;
   todaySpent: number;
   monthSpent: number;
@@ -50,35 +56,27 @@ export type SpendDashboard = {
   periodBillCount: number;
   recent: PaidBill[];
   periodBills: PaidBill[];
+  spendByDay: Map<string, number>;
+  priorPeriodSpent: number;
 };
-
-function periodStart(period: ReportPeriod): Date | null {
-  const now = new Date();
-  switch (period) {
-    case "today":
-      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    case "week":
-      return startOfWeek(now);
-    case "month":
-      return startOfMonth(now);
-    case "year":
-      return startOfYear(now);
-    case "all":
-      return null;
-  }
-}
-
-function inPeriod(paidAt: string, period: ReportPeriod): boolean {
-  const start = periodStart(period);
-  if (!start) return true;
-  const day = String(paidAt).slice(0, 10);
-  return day >= dayKey(start);
-}
 
 export async function getSpendDashboard(
   orgId: string,
-  period: ReportPeriod = "all",
+  periodOrFilter: ReportPeriod | DateFilterState = "all",
 ): Promise<SpendDashboard> {
+  const filter: DateFilterState =
+    typeof periodOrFilter === "string"
+      ? defaultDateFilter(periodOrFilter)
+      : periodOrFilter;
+  const range = resolveDateRange(filter);
+  const prior = (() => {
+    if (!range.from || !range.to) return null;
+    const ms = range.to.getTime() - range.from.getTime();
+    const to = new Date(range.from.getTime() - 1);
+    const from = new Date(to.getTime() - ms);
+    return { from, to };
+  })();
+
   const bills = await listPaidBills(orgId);
   const today = dayKey();
   const monthPrefix = today.slice(0, 7);
@@ -86,21 +84,37 @@ export async function getSpendDashboard(
   let todaySpent = 0;
   let monthSpent = 0;
   let periodSpent = 0;
+  let priorPeriodSpent = 0;
   const periodBills: PaidBill[] = [];
+  const spendByDay = new Map<string, number>();
 
   for (const b of bills) {
     const amt = Number(b.amount) || 0;
     const day = String(b.paid_at).slice(0, 10);
+    const paidMs = new Date(b.paid_at).getTime();
     if (day === today) todaySpent += amt;
     if (day.startsWith(monthPrefix)) monthSpent += amt;
-    if (inPeriod(b.paid_at, period)) {
+
+    const inRange =
+      (!range.from || paidMs >= range.from.getTime()) &&
+      (!range.to || paidMs <= range.to.getTime());
+    if (inRange) {
       periodSpent += amt;
       periodBills.push(b);
+      spendByDay.set(day, (spendByDay.get(day) || 0) + amt);
+    }
+    if (
+      prior &&
+      paidMs >= prior.from.getTime() &&
+      paidMs <= prior.to.getTime()
+    ) {
+      priorPeriodSpent += amt;
     }
   }
 
   return {
-    period,
+    period: filter.period,
+    rangeLabel: range.label,
     periodSpent: Math.round(periodSpent * 100) / 100,
     todaySpent: Math.round(todaySpent * 100) / 100,
     monthSpent: Math.round(monthSpent * 100) / 100,
@@ -108,6 +122,8 @@ export async function getSpendDashboard(
     periodBillCount: periodBills.length,
     recent: bills.slice(0, 5),
     periodBills: periodBills.slice(0, 8),
+    spendByDay,
+    priorPeriodSpent: Math.round(priorPeriodSpent * 100) / 100,
   };
 }
 

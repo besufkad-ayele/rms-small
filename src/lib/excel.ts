@@ -3,7 +3,10 @@ import type { ReportPeriod } from "@/lib/types";
 
 export function downloadWorkbook(
   filename: string,
-  sheets: { name: string; rows: Record<string, string | number | null | undefined>[] }[],
+  sheets: {
+    name: string;
+    rows: Record<string, string | number | null | undefined>[];
+  }[],
 ) {
   const wb = XLSX.utils.book_new();
   for (const sheet of sheets) {
@@ -13,17 +16,21 @@ export function downloadWorkbook(
   XLSX.writeFile(wb, filename);
 }
 
-export function periodLabel(period: ReportPeriod): string {
+export function periodLabel(period: ReportPeriod | string): string {
   switch (period) {
     case "today":
       return "daily";
     case "week":
       return "weekly";
-    case "month":
-      return "monthly";
+      case "month":
+        return "this-month";
     case "year":
       return "yearly";
     case "all":
       return "all-time";
+    default:
+      return (
+        String(period).replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 40) || "range"
+      );
   }
 }

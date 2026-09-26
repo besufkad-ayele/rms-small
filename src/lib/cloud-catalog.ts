@@ -6,6 +6,7 @@ export interface CloudInventoryItem {
   organization_id: string;
   name: string;
   unit: string;
+  unit_id?: string | null;
   stock_qty: number;
   low_stock_threshold: number;
   cost_per_unit: number;
@@ -21,6 +22,7 @@ export interface CloudMenuItem {
   price: number;
   available: boolean;
   description: string;
+  tags?: string[];
   vote_count: number;
   updated_at?: string;
   recipe?: { inventory_item_id: string; quantity_required: number }[];
@@ -99,6 +101,7 @@ export async function upsertInventory(
     id?: string;
     name: string;
     unit: string;
+    unit_id?: string | null;
     stock_qty: number;
     low_stock_threshold: number;
     cost_per_unit: number;
@@ -109,6 +112,7 @@ export async function upsertInventory(
     organization_id: orgId,
     name: input.name.trim(),
     unit: input.unit.trim(),
+    unit_id: input.unit_id || null,
     stock_qty: input.stock_qty,
     low_stock_threshold: input.low_stock_threshold,
     cost_per_unit: input.cost_per_unit,
@@ -158,9 +162,11 @@ export async function listMenuChangedSince(
   return (data || []).map((row) => {
     const r = row as CloudMenuItem & {
       menu_recipes?: CloudMenuItem["recipe"];
+      tags?: string[] | null;
     };
     return {
       ...r,
+      tags: Array.isArray(r.tags) ? r.tags : [],
       recipe: r.menu_recipes || [],
     };
   });
@@ -175,10 +181,12 @@ export async function upsertMenu(
     price: number;
     available: boolean;
     description: string;
+    tags?: string[];
     recipe: { inventory_item_id: string; quantity_required: number }[];
   },
 ) {
   const supabase = createClient();
+  const tags = (input.tags || []).map((t) => t.trim().toLowerCase()).filter(Boolean);
   let menuId = input.id;
   if (menuId) {
     const { error } = await supabase
@@ -189,6 +197,7 @@ export async function upsertMenu(
         price: input.price,
         available: input.available,
         description: input.description.trim(),
+        tags,
         updated_at: new Date().toISOString(),
       })
       .eq("id", menuId)
@@ -205,6 +214,7 @@ export async function upsertMenu(
         price: input.price,
         available: input.available,
         description: input.description.trim(),
+        tags,
       })
       .select("id")
       .single();
@@ -234,6 +244,7 @@ export async function deleteMenu(orgId: string, id: string) {
   if (error) throw new Error(error.message);
 }
 
+/** Opt-in only — new orgs start empty. Call from UI “Load sample data”. */
 export async function seedOrgCatalog(orgId: string) {
   const supabase = createClient();
   const { data: meta } = await supabase

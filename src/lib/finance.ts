@@ -1,22 +1,12 @@
 import { createClient } from "@/lib/supabase/client";
 import type { ReportPeriod } from "@/lib/types";
-import { startOfMonth, startOfWeek, startOfYear } from "@/lib/utils";
-
-function periodStart(period: ReportPeriod): Date | null {
-  const now = new Date();
-  switch (period) {
-    case "today":
-      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    case "week":
-      return startOfWeek(now);
-    case "month":
-      return startOfMonth(now);
-    case "year":
-      return startOfYear(now);
-    case "all":
-      return null;
-  }
-}
+import {
+  priorDateRange,
+  resolveDateRange,
+  type DateFilterState,
+  type DateRange,
+} from "@/lib/date-range";
+import { defaultDateFilter } from "@/lib/date-range";
 
 export type OrderFinanceRow = {
   orderId: string;
@@ -48,8 +38,19 @@ export type ItemFinanceRow = {
   orderCount: number;
 };
 
+export type SeriesPoint = {
+  key: string;
+  label: string;
+  revenue: number;
+  spend: number;
+  net: number;
+};
+
 export type FinanceDashboard = {
   period: ReportPeriod;
+  rangeLabel: string;
+  fromIso: string | null;
+  toIso: string | null;
   orderCount: number;
   itemsSold: number;
   revenue: number;
@@ -59,8 +60,12 @@ export type FinanceDashboard = {
   cogs: number;
   grossProfit: number;
   grossMarginPct: number;
+  priorRevenue: number;
+  priorSpend: number;
+  revenueGrowthPct: number | null;
   byOrder: OrderFinanceRow[];
   byItem: ItemFinanceRow[];
+  series: SeriesPoint[];
 };
 
 async function recipeUnitCostMap(orgId: string) {
@@ -89,23 +94,101 @@ async function recipeUnitCostMap(orgId: string) {
   return unitCostByMenu;
 }
 
+function applyRange(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  q: any,
+  range: DateRange,
+) {
+  if (range.from) q = q.gte("created_at", range.from.toISOString());
+  if (range.to) q = q.lte("created_at", range.to.toISOString());
+  return q;
+}
+
+function buildSeries(
+  orders: { created_at: string; total: number }[],
+  spendByDay: Map<string, number>,
+  range: DateRange,
+): SeriesPoint[] {
+  const byDay = new Map<string, { revenue: number; spend: number }>();
+
+  for (const o of orders) {
+    const key = String(o.created_at).slice(0, 10);
+    const prev = byDay.get(key) || { revenue: 0, spend: 0 };
+    prev.revenue += Number(o.total) || 0;
+    byDay.set(key, prev);
+  }
+  for (const [day, amt] of spendByDay) {
+    const prev = byDay.get(day) || { revenue: 0, spend: 0 };
+    prev.spend += amt;
+    byDay.set(day, prev);
+  }
+
+  // Fill empty days in range for smoother charts (cap 90 points)
+  if (range.from && range.to) {
+    const days =
+      Math.ceil(
+        (range.to.getTime() - range.from.getTime()) / (1000 * 60 * 60 * 24),
+      ) + 1;
+    if (days <= 90) {
+      for (let i = 0; i < days; i++) {
+        const d = new Date(range.from);
+        d.setDate(d.getDate() + i);
+        const key = d.toISOString().slice(0, 10);
+        if (!byDay.has(key)) byDay.set(key, { revenue: 0, spend: 0 });
+      }
+    }
+  }
+
+  return [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, v]) => ({
+      key,
+      label: key.slice(5),
+      revenue: Math.round(v.revenue * 100) / 100,
+      spend: Math.round(v.spend * 100) / 100,
+      net: Math.round((v.revenue - v.spend) * 100) / 100,
+    }));
+}
+
 export async function getFinanceDashboard(
   orgId: string,
-  period: ReportPeriod,
+  periodOrFilter: ReportPeriod | DateFilterState,
+  spendByDay?: Map<string, number>,
 ): Promise<FinanceDashboard> {
+  const filter: DateFilterState =
+    typeof periodOrFilter === "string"
+      ? defaultDateFilter(periodOrFilter)
+      : periodOrFilter;
+  const range = resolveDateRange(filter);
+  const prior = priorDateRange(range);
+
   const supabase = createClient();
   let q = supabase
     .from("sale_orders")
     .select("*, sale_order_lines(*)")
     .eq("organization_id", orgId)
     .order("created_at", { ascending: false });
-  const start = periodStart(period);
-  if (start) q = q.gte("created_at", start.toISOString());
-  const { data, error } = await q;
+  q = applyRange(q, range);
+
+  let priorQ = supabase
+    .from("sale_orders")
+    .select("total")
+    .eq("organization_id", orgId);
+  priorQ = applyRange(priorQ, prior);
+
+  const [{ data, error }, { data: priorRows }, unitCostByMenu] =
+    await Promise.all([
+      q,
+      prior.from ? priorQ : Promise.resolve({ data: [] as { total: number }[] }),
+      recipeUnitCostMap(orgId),
+    ]);
   if (error) throw new Error(error.message);
 
-  const unitCostByMenu = await recipeUnitCostMap(orgId);
   const orders = data || [];
+  const priorRevenue = (priorRows || []).reduce(
+    (s, o) => s + (Number(o.total) || 0),
+    0,
+  );
 
   const byOrder: OrderFinanceRow[] = [];
   const itemMap = new Map<string, ItemFinanceRow>();
@@ -160,7 +243,6 @@ export async function getFinanceDashboard(
       itemMap.set(key, prev);
     }
 
-    // Count distinct orders contributing per item
     for (const menuId of orderMenus) {
       const row = itemMap.get(menuId);
       if (row) row.orderCount += 1;
@@ -206,9 +288,24 @@ export async function getFinanceDashboard(
     .sort((a, b) => b.quantity - a.quantity);
 
   const grossProfit = Math.round((revenue - cogs) * 100) / 100;
+  const series = buildSeries(
+    orders.map((o) => ({ created_at: o.created_at, total: Number(o.total) })),
+    spendByDay || new Map(),
+    range,
+  );
+  const priorSpend = 0; // filled by caller when spend known
+  const revenueGrowthPct =
+    priorRevenue > 0
+      ? Math.round(((revenue - priorRevenue) / priorRevenue) * 1000) / 10
+      : revenue > 0
+        ? 100
+        : null;
 
   return {
-    period,
+    period: filter.period,
+    rangeLabel: range.label,
+    fromIso: range.from?.toISOString() ?? null,
+    toIso: range.to?.toISOString() ?? null,
     orderCount: orders.length,
     itemsSold,
     revenue: Math.round(revenue * 100) / 100,
@@ -219,7 +316,11 @@ export async function getFinanceDashboard(
     grossProfit,
     grossMarginPct:
       revenue > 0 ? Math.round((grossProfit / revenue) * 1000) / 10 : 0,
+    priorRevenue: Math.round(priorRevenue * 100) / 100,
+    priorSpend,
+    revenueGrowthPct,
     byOrder,
     byItem,
+    series,
   };
 }
