@@ -258,6 +258,7 @@ function PackageEditor({
     monthlyPriceEtb: number;
     menuEnabled: boolean;
     orderingEnabled: boolean;
+    kitchenEnabled: boolean;
     inventoryEnabled: boolean;
     financeEnabled: boolean;
     hrEnabled: boolean;
@@ -271,6 +272,7 @@ function PackageEditor({
     : {
         menu: true,
         ordering: true,
+        kitchen: false,
         inventory: false,
         finance: false,
         hr: false,
@@ -290,6 +292,7 @@ function PackageEditor({
           monthlyPriceEtb: Number(fd.get("price") || 0),
           menuEnabled: mods.menu,
           orderingEnabled: mods.ordering,
+          kitchenEnabled: mods.kitchen,
           inventoryEnabled: mods.inventory,
           financeEnabled: mods.finance,
           hrEnabled: mods.hr,

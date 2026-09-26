@@ -21,6 +21,7 @@ import { cn, formatDateTime, formatMoney } from "@/lib/utils";
 const MODULES: AppModule[] = [
   "menu",
   "ordering",
+  "kitchen",
   "inventory",
   "finance",
   "hr",
@@ -28,8 +29,9 @@ const MODULES: AppModule[] = [
 
 const MODULE_HINTS: Record<AppModule, string> = {
   menu: "Recipes, categories, availability",
-  ordering: "Tables, POS, kitchen tickets",
-  inventory: "Stock, purchases, units",
+  ordering: "POS & placed-order queue",
+  kitchen: "Kitchen display & prep status",
+  inventory: "Stock, suppliers & movements",
   finance: "Reports & day close",
   hr: "Staff seats & permissions",
 };
@@ -43,13 +45,16 @@ function flagsFromSub(
     | "finance_enabled"
     | "menu_enabled"
     | "ordering_enabled"
+    | "kitchen_enabled"
     | "hr_enabled"
   >,
 ): ModuleState {
   const inv = sub.inventory_enabled;
+  const ordering = sub.ordering_enabled ?? inv;
   return {
     menu: sub.menu_enabled ?? inv,
-    ordering: sub.ordering_enabled ?? inv,
+    ordering,
+    kitchen: sub.kitchen_enabled ?? ordering,
     inventory: inv,
     finance: sub.finance_enabled,
     hr: sub.hr_enabled ?? true,
@@ -57,7 +62,7 @@ function flagsFromSub(
 }
 
 export function BillingPanel() {
-  const { tenant, daysLeft, warningLevel, setModules, uploadProof, accessBlocked } =
+  const { tenant, daysLeft, warningLevel, uploadProof, accessBlocked } =
     useAuth();
   const [mods, setMods] = useState<ModuleState>(() =>
     flagsFromSub(
@@ -139,21 +144,6 @@ export function BillingPanel() {
   const endsAt = subscriptionEndsAt(sub);
   const kind = sub.status === "trialing" ? "Trial" : "Subscription";
 
-  async function saveModules() {
-    setBusy(true);
-    setError(null);
-    const err = await setModules({
-      menuEnabled: mods.menu,
-      orderingEnabled: mods.ordering,
-      inventoryEnabled: mods.inventory,
-      financeEnabled: mods.finance,
-      hrEnabled: mods.hr,
-    });
-    setBusy(false);
-    if (err) setError(err);
-    else setMessage("Modules updated.");
-  }
-
   async function onProof(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
@@ -198,6 +188,7 @@ export function BillingPanel() {
       modules: {
         menuEnabled: modulesForSubmit.menu,
         orderingEnabled: modulesForSubmit.ordering,
+        kitchenEnabled: modulesForSubmit.kitchen,
         inventoryEnabled: modulesForSubmit.inventory,
         financeEnabled: modulesForSubmit.finance,
         hrEnabled: modulesForSubmit.hr,
@@ -305,37 +296,44 @@ export function BillingPanel() {
       <section className="rounded-3xl border border-ink/8 bg-white/90 p-4 sm:p-6">
         <h2 className="font-display text-xl">Modules</h2>
         <p className="mt-1 text-sm text-ink/55">
-          Toggle which areas your business uses. Keep at least one enabled.
+          These are the areas Aramis has enabled for your restaurant
+          {sub.status === "trialing" ? " during your trial" : ""}. To add more,
+          request them with a payment proof below — access updates only after
+          approval.
         </p>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          {MODULES.map((m) => (
-            <label
-              key={m}
-              className="flex items-start gap-3 rounded-2xl bg-stone/50 p-3 text-sm"
-            >
-              <input
-                type="checkbox"
-                checked={mods[m]}
-                onChange={(e) =>
-                  setMods((prev) => ({ ...prev, [m]: e.target.checked }))
-                }
-                className="mt-1"
-              />
-              <span>
-                <span className="font-medium">{APP_MODULE_LABELS[m]}</span>
-                <span className="block text-xs text-ink/50">{MODULE_HINTS[m]}</span>
-              </span>
-            </label>
-          ))}
-        </div>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void saveModules()}
-          className="mt-4 w-full rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-stone sm:w-auto sm:px-6"
-        >
-          Save modules
-        </button>
+        <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+          {MODULES.map((m) => {
+            const on = mods[m];
+            return (
+              <li
+                key={m}
+                className={cn(
+                  "flex items-start gap-3 rounded-2xl p-3 text-sm",
+                  on ? "bg-teal/10" : "bg-stone/50 opacity-70",
+                )}
+              >
+                <span
+                  className={cn(
+                    "mt-0.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full",
+                    on ? "bg-teal" : "bg-ink/20",
+                  )}
+                  aria-hidden
+                />
+                <span>
+                  <span className="font-medium">
+                    {APP_MODULE_LABELS[m]}
+                    <span className="ml-2 text-xs font-normal text-ink/45">
+                      {on ? "Enabled" : "Not enabled"}
+                    </span>
+                  </span>
+                  <span className="block text-xs text-ink/50">
+                    {MODULE_HINTS[m]}
+                  </span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
       </section>
 
       <section className="rounded-3xl border border-ink/8 bg-white/90 p-4 sm:p-6">

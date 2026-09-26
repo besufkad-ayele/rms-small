@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
+  ChefHat,
   ClipboardList,
   CreditCard,
   Package,
@@ -57,22 +58,42 @@ export function HomeHub() {
   if (!tenant) return null;
 
   const modules = [
+    ...(hasFeature("order")
+      ? [
+          {
+            href: "/app/order",
+            title: "Order",
+            blurb: "Place orders & cashier queue",
+            icon: ShoppingCart,
+          },
+        ]
+      : []),
+    ...(hasFeature("kitchen")
+      ? [
+          {
+            href: "/app/kitchen",
+            title: "Kitchen",
+            blurb: "Prep tickets & status",
+            icon: ChefHat,
+          },
+        ]
+      : []),
     ...(hasFeature("menu")
       ? [
           {
             href: "/app/menu",
             title: "Menu",
-            blurb: "Prices, recipes & popularity",
+            blurb: "Prices, photos & recipes",
             icon: ClipboardList,
           },
         ]
       : []),
-    ...(hasFeature("inventory")
+    ...(hasFeature("inventory") || hasFeature("inventory_issue")
       ? [
           {
             href: "/app/inventory",
             title: "Inventory",
-            blurb: "Stock with cost history",
+            blurb: "Receive, issue & suppliers",
             icon: Package,
           },
         ]

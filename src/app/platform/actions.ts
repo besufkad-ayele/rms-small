@@ -107,6 +107,7 @@ export type ApplicationRow = Record<string, unknown>;
 export type ModuleToggleInput = {
   menuEnabled?: boolean;
   orderingEnabled?: boolean;
+  kitchenEnabled?: boolean;
   inventoryEnabled?: boolean;
   financeEnabled?: boolean;
   hrEnabled?: boolean;
@@ -129,10 +130,14 @@ function resolveModuleFlags(
   fallback?: Record<string, unknown> | null,
 ) {
   const inv = Boolean(fallback?.inventory_enabled ?? true);
+  const ordering =
+    input.orderingEnabled ?? Boolean(fallback?.ordering_enabled ?? inv);
   return {
     menu_enabled: input.menuEnabled ?? Boolean(fallback?.menu_enabled ?? inv),
-    ordering_enabled:
-      input.orderingEnabled ?? Boolean(fallback?.ordering_enabled ?? inv),
+    ordering_enabled: ordering,
+    kitchen_enabled:
+      input.kitchenEnabled ??
+      Boolean(fallback?.kitchen_enabled ?? ordering),
     inventory_enabled: input.inventoryEnabled ?? inv,
     finance_enabled:
       input.financeEnabled ?? Boolean(fallback?.finance_enabled ?? true),
@@ -145,6 +150,7 @@ function modulePatchFromProof(proof: Record<string, unknown>) {
   const keys = [
     "menu_enabled",
     "ordering_enabled",
+    "kitchen_enabled",
     "inventory_enabled",
     "finance_enabled",
     "hr_enabled",
@@ -261,6 +267,7 @@ export async function approveOrganizationAction(input: {
   trialEndsAt?: string | null;
   menuEnabled?: boolean;
   orderingEnabled?: boolean;
+  kitchenEnabled?: boolean;
   inventoryEnabled?: boolean;
   financeEnabled?: boolean;
   hrEnabled?: boolean;
@@ -413,6 +420,7 @@ export async function approveApplicationAction(input: {
   applicationId: string;
   menuEnabled?: boolean;
   orderingEnabled?: boolean;
+  kitchenEnabled?: boolean;
   inventoryEnabled?: boolean;
   financeEnabled?: boolean;
   hrEnabled?: boolean;
@@ -509,6 +517,7 @@ export async function updateTenantSubscriptionAction(input: {
   status: SubStatus;
   menuEnabled: boolean;
   orderingEnabled: boolean;
+  kitchenEnabled: boolean;
   inventoryEnabled: boolean;
   financeEnabled: boolean;
   hrEnabled: boolean;
@@ -525,6 +534,7 @@ export async function updateTenantSubscriptionAction(input: {
     status: input.status,
     menu_enabled: input.menuEnabled,
     ordering_enabled: input.orderingEnabled,
+    kitchen_enabled: input.kitchenEnabled,
     inventory_enabled: input.inventoryEnabled,
     finance_enabled: input.financeEnabled,
     hr_enabled: input.hrEnabled,
@@ -645,6 +655,7 @@ export type PaymentProofRow = Record<string, unknown> & {
   media_kind?: "image" | "video" | string | null;
   menu_enabled?: boolean | null;
   ordering_enabled?: boolean | null;
+  kitchen_enabled?: boolean | null;
   inventory_enabled?: boolean | null;
   finance_enabled?: boolean | null;
   hr_enabled?: boolean | null;
@@ -698,6 +709,7 @@ export async function approvePaymentProofAction(input: {
   notes?: string;
   menuEnabled?: boolean;
   orderingEnabled?: boolean;
+  kitchenEnabled?: boolean;
   inventoryEnabled?: boolean;
   financeEnabled?: boolean;
   hrEnabled?: boolean;
@@ -776,6 +788,7 @@ export async function approvePaymentProofAction(input: {
   const hasOverride =
     input.menuEnabled !== undefined ||
     input.orderingEnabled !== undefined ||
+    input.kitchenEnabled !== undefined ||
     input.inventoryEnabled !== undefined ||
     input.financeEnabled !== undefined ||
     input.hrEnabled !== undefined;
@@ -925,6 +938,7 @@ export async function upsertPackageAction(input: {
   monthlyPriceEtb: number;
   menuEnabled: boolean;
   orderingEnabled: boolean;
+  kitchenEnabled: boolean;
   inventoryEnabled: boolean;
   financeEnabled: boolean;
   hrEnabled: boolean;
@@ -945,6 +959,7 @@ export async function upsertPackageAction(input: {
     monthly_price_etb: Math.max(0, Number(input.monthlyPriceEtb) || 0),
     menu_enabled: input.menuEnabled,
     ordering_enabled: input.orderingEnabled,
+    kitchen_enabled: input.kitchenEnabled,
     inventory_enabled: input.inventoryEnabled,
     finance_enabled: input.financeEnabled,
     hr_enabled: input.hrEnabled,
@@ -1019,6 +1034,7 @@ export async function startTrialAction(input: {
   trialEndsAt?: string | null;
   menuEnabled?: boolean;
   orderingEnabled?: boolean;
+  kitchenEnabled?: boolean;
   inventoryEnabled?: boolean;
   financeEnabled?: boolean;
   hrEnabled?: boolean;
@@ -1231,6 +1247,7 @@ export async function grantPaidMonthsAction(input: {
   periodEndsAt?: string | null;
   menuEnabled?: boolean;
   orderingEnabled?: boolean;
+  kitchenEnabled?: boolean;
   inventoryEnabled?: boolean;
   financeEnabled?: boolean;
   hrEnabled?: boolean;

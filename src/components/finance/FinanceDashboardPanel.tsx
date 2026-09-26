@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   LayoutList,
   ListOrdered,
+  Receipt,
   Trash2,
   Wallet,
 } from "lucide-react";
@@ -26,6 +27,7 @@ import {
 import { saveDayCloseResilient } from "@/lib/offline/resilient";
 import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import { PaidBillsPanel } from "@/components/finance/PaidBillsPanel";
+import { ReceiptDesigner } from "@/components/finance/ReceiptDesigner";
 import { SparkLines } from "@/components/finance/SparkLines";
 import {
   defaultDateFilter,
@@ -44,12 +46,13 @@ const PERIODS: { id: ReportPeriod; label: string }[] = [
 ];
 
 type ViewMode = "orders" | "items";
-type MainTab = "overall" | "finance" | "spend";
+type MainTab = "overall" | "finance" | "spend" | "receipt";
 
 const TABS: { id: MainTab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "overall", label: "Overall", icon: LayoutDashboard },
   { id: "finance", label: "Finance", icon: ListOrdered },
   { id: "spend", label: "Spend", icon: Wallet },
+  { id: "receipt", label: "Receipt & tax", icon: Receipt },
 ];
 
 export function FinanceDashboardPanel() {
@@ -969,6 +972,17 @@ export function FinanceDashboardPanel() {
 
           <PaidBillsPanel orgId={orgId} onChanged={() => void reload()} />
         </>
+      ) : null}
+
+      {tab === "receipt" ? (
+        <ReceiptDesigner
+          orgId={orgId}
+          defaults={{
+            businessName: tenant?.organization.name,
+            phone: tenant?.organization.phone,
+            address: tenant?.organization.address,
+          }}
+        />
       ) : null}
     </div>
   );

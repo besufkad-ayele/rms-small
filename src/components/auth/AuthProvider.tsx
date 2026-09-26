@@ -81,6 +81,7 @@ interface AuthState {
     financeEnabled: boolean;
     menuEnabled?: boolean;
     orderingEnabled?: boolean;
+    kitchenEnabled?: boolean;
     hrEnabled?: boolean;
     licenseFile?: File | null;
     idFile?: File | null;
@@ -109,7 +110,10 @@ function featureModule(feature: StaffFeature): AppModule | null {
       return "menu";
     case "order":
       return "ordering";
+    case "kitchen":
+      return "kitchen";
     case "inventory":
+    case "inventory_issue":
       return "inventory";
     case "finance":
       return "finance";
@@ -272,6 +276,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       financeEnabled: boolean;
       menuEnabled?: boolean;
       orderingEnabled?: boolean;
+      kitchenEnabled?: boolean;
       hrEnabled?: boolean;
       licenseFile?: File | null;
       idFile?: File | null;
@@ -377,6 +382,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       if (module === "ordering") {
         return checkFeature(tenant.membership, "order");
+      }
+      if (module === "kitchen") {
+        return checkFeature(tenant.membership, "kitchen");
       }
       if (module === "finance") {
         return checkFeature(tenant.membership, "finance");

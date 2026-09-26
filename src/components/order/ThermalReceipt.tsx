@@ -1,81 +1,84 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Printer } from "lucide-react";
 import type { CloudSaleOrder } from "@/lib/cloud-sales";
-import { formatMoney } from "@/lib/utils";
+import { ReceiptPaperPreview } from "@/components/finance/ReceiptPaperPreview";
+import {
+  DEFAULT_RECEIPT_PROFILE,
+  getOrgReceiptSettings,
+  type ReceiptProfile,
+} from "@/lib/org-tax";
 
 export function ThermalReceipt({
   order,
   businessName,
   phone,
   address,
+  orgId,
   onDone,
 }: {
   order: CloudSaleOrder;
   businessName: string;
   phone?: string | null;
   address?: string | null;
+  orgId?: string;
   onDone: () => void;
 }) {
-  const lines = order.lines || [];
+  const [profile, setProfile] = useState<ReceiptProfile>({
+    ...DEFAULT_RECEIPT_PROFILE,
+    businessName,
+    phone: phone || "",
+    address: address || "",
+  });
+  const [vatPercent, setVatPercent] = useState(
+    Number(order.vat_percent ?? 15),
+  );
+  const [servicePercent, setServicePercent] = useState(
+    Number(order.service_percent ?? 10),
+  );
+
+  useEffect(() => {
+    if (!orgId) return;
+    void getOrgReceiptSettings(orgId)
+      .then((s) => {
+        setProfile({
+          ...s.profile,
+          businessName: s.profile.businessName || businessName,
+          phone: s.profile.phone || phone || "",
+          address: s.profile.address || address || "",
+        });
+        if (order.vat_percent == null) setVatPercent(s.vat_percent);
+        if (order.service_percent == null) setServicePercent(s.service_percent);
+      })
+      .catch(() => undefined);
+  }, [orgId, businessName, phone, address, order.vat_percent, order.service_percent]);
+
+  const lines = order.lines || order.sale_order_lines || [];
 
   return (
     <div className="mx-auto max-w-md space-y-4">
-      <div className="thermal-receipt mx-auto w-[80mm] max-w-full rounded-sm border border-ink/15 bg-white p-4 text-black shadow-sm">
-        <div className="space-y-1 border-b border-dashed border-neutral-400 pb-3 text-center">
-          <p className="text-base font-bold leading-tight">{businessName}</p>
-          {address ? <p className="text-[11px] leading-snug">{address}</p> : null}
-          {phone ? <p className="text-[11px]">{phone}</p> : null}
-          <p className="pt-1 text-[10px] font-bold uppercase tracking-wider">
-            Aramis sales receipt
-          </p>
-        </div>
-
-        <div className="space-y-0.5 border-b border-dashed border-neutral-400 py-2 text-[11px]">
-          <Row label="Receipt" value={order.receipt_number} mono />
-          <Row
-            label="Date"
-            value={new Date(order.created_at).toLocaleString("en-ET")}
-          />
-          <Row label="Cashier" value={order.cashier_name} />
-          <Row label="Tender" value={order.payment_method.toUpperCase()} />
-          {order.payment_reference ? (
-            <Row label="Ref" value={order.payment_reference} mono />
-          ) : null}
-        </div>
-
-        <table className="my-2 w-full text-[11px]">
-          <thead>
-            <tr className="border-b border-neutral-300">
-              <th className="py-1 text-left font-semibold">Item</th>
-              <th className="text-right font-semibold">Qty</th>
-              <th className="text-right font-semibold">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((item, index) => (
-              <tr key={`${item.name}-${index}`}>
-                <td className="py-0.5 pr-1">{item.name}</td>
-                <td className="text-right">{item.quantity}</td>
-                <td className="text-right">{formatMoney(item.line_total)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <div className="space-y-0.5 border-t border-dashed border-neutral-400 pt-2 text-[11px]">
-          <Row label="Subtotal" value={formatMoney(Number(order.subtotal))} />
-          <Row label="Service 10%" value={formatMoney(Number(order.service_charge))} />
-          <Row label="VAT 15%" value={formatMoney(Number(order.vat))} />
-          <div className="flex justify-between pt-1 text-sm font-bold">
-            <span>TOTAL</span>
-            <span>{formatMoney(Number(order.total))}</span>
-          </div>
-        </div>
-        <p className="mt-3 text-center text-[10px] text-neutral-600">
-          Thank you — powered by Aramis
-        </p>
-      </div>
+      <ReceiptPaperPreview
+        sample={false}
+        profile={profile}
+        vatPercent={vatPercent}
+        servicePercent={servicePercent}
+        order={{
+          receipt_number: order.receipt_number,
+          created_at: order.created_at,
+          cashier_name: order.cashier_name,
+          payment_method: order.payment_method,
+          payment_reference: order.payment_reference,
+          place_label: order.place_label,
+          lines,
+          subtotal: Number(order.subtotal),
+          service_charge: Number(order.service_charge),
+          vat: Number(order.vat),
+          total: Number(order.total),
+          vat_percent: order.vat_percent,
+          service_percent: order.service_percent,
+        }}
+      />
 
       <div className="no-print flex flex-col gap-2 sm:flex-row">
         <button
@@ -94,23 +97,6 @@ export function ThermalReceipt({
           Next order
         </button>
       </div>
-    </div>
-  );
-}
-
-function Row({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex justify-between gap-2">
-      <span>{label}</span>
-      <span className={mono ? "font-mono font-bold" : undefined}>{value}</span>
     </div>
   );
 }

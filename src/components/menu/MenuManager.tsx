@@ -21,6 +21,12 @@ import {
   sortMenuByTags,
   tagLabel,
 } from "@/lib/menu-tags";
+import {
+  MENU_IMAGE_MAX_BYTES,
+  assertMenuImageSize,
+  formatBytes,
+  uploadMenuImage,
+} from "@/lib/menu-image";
 import type { MenuCategory } from "@/lib/tenant";
 import { cn, formatMoney } from "@/lib/utils";
 
@@ -40,6 +46,8 @@ export function MenuManager() {
   const [description, setDescription] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [customTag, setCustomTag] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [recipe, setRecipe] = useState<
     { inventory_item_id: string; quantity_required: number }[]
   >([]);
@@ -95,6 +103,8 @@ export function MenuManager() {
     setDescription("");
     setTags([]);
     setCustomTag("");
+    setImageFile(null);
+    setImagePreview(null);
     setRecipe([]);
   }
 
@@ -107,6 +117,8 @@ export function MenuManager() {
     setDescription(item.description || "");
     setTags(normalizeTags(item.tags));
     setRecipe(item.recipe || []);
+    setImageFile(null);
+    setImagePreview(item.image_url || null);
   }
 
   function toggleTag(id: string) {
@@ -124,28 +136,59 @@ export function MenuManager() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const { offlineQueued } = await upsertMenuResilient(orgId, {
-      id: editing?.id,
-      name,
-      category,
-      price: Number(price),
-      available,
-      description,
-      tags: normalizeTags(tags),
-      recipe,
-    });
-    setMessage(
-      offlineQueued
-        ? editing
-          ? "Saved offline — will sync"
-          : "Added offline — will sync"
-        : editing
-          ? "Updated"
-          : "Added",
-    );
-    reset();
-    if (offlineQueued) await refreshPendingCount();
-    await reload();
+    setMessage(null);
+    try {
+      const base = {
+        id: editing?.id,
+        name,
+        category,
+        price: Number(price),
+        available,
+        description,
+        tags: normalizeTags(tags),
+        recipe,
+        image_url: editing?.image_url ?? null,
+      };
+
+      // Prefer direct cloud write when uploading a photo (need the item id).
+      if (imageFile) {
+        const { upsertMenu } = await import("@/lib/cloud-catalog");
+        const menuId = await upsertMenu(orgId, base);
+        try {
+          const url = await uploadMenuImage(orgId, menuId, imageFile);
+          if (url) {
+            await upsertMenu(orgId, { ...base, id: menuId, image_url: url });
+          }
+        } catch {
+          setMessage(
+            "Item saved — photo upload failed (edit to retry). Other fields are fine.",
+          );
+          reset();
+          await reload();
+          return;
+        }
+        setMessage(editing ? "Updated" : "Added");
+        reset();
+        await reload();
+        return;
+      }
+
+      const { offlineQueued } = await upsertMenuResilient(orgId, base);
+      setMessage(
+        offlineQueued
+          ? editing
+            ? "Saved offline — will sync"
+            : "Added offline — will sync"
+          : editing
+            ? "Updated"
+            : "Added",
+      );
+      reset();
+      if (offlineQueued) await refreshPendingCount();
+      await reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Save failed");
+    }
   }
 
   async function confirmDelete() {
@@ -283,6 +326,51 @@ export function MenuManager() {
                 onChange={(e) => setDescription(e.target.value)}
               />
             </label>
+
+            <div className="block text-sm">
+              <span className="mb-1 block text-ink/60">
+                Food photo{" "}
+                <span className="text-ink/40">
+                  (optional · WebP · max {formatBytes(MENU_IMAGE_MAX_BYTES)})
+                </span>
+              </span>
+              <input
+                type="file"
+                accept="image/*"
+                className="field file:mr-3 file:rounded-lg file:border-0 file:bg-ink/5 file:px-3 file:py-1.5"
+                onChange={(e) => {
+                  const input = e.target;
+                  const file = input.files?.[0] || null;
+                  if (!file) {
+                    setImageFile(null);
+                    if (!editing?.image_url) setImagePreview(null);
+                    return;
+                  }
+                  try {
+                    assertMenuImageSize(file);
+                    setImageFile(file);
+                    setImagePreview(URL.createObjectURL(file));
+                    setMessage(null);
+                  } catch (err) {
+                    setImageFile(null);
+                    setImagePreview(editing?.image_url || null);
+                    input.value = "";
+                    setMessage(
+                      err instanceof Error ? err.message : "Photo too large",
+                    );
+                  }
+                }}
+              />
+              {imagePreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={imagePreview}
+                  alt=""
+                  className="mt-2 h-28 w-28 rounded-2xl object-cover"
+                />
+              ) : null}
+            </div>
+
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -435,6 +523,14 @@ export function MenuManager() {
                 key={item.id}
                 className="flex flex-wrap items-start gap-2 rounded-2xl border border-ink/8 bg-stone/40 px-3 py-3"
               >
+                {item.image_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={item.image_url}
+                    alt=""
+                    className="h-14 w-14 shrink-0 rounded-xl object-cover"
+                  />
+                ) : null}
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-medium">{item.name}</p>

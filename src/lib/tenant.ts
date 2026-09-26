@@ -1,11 +1,58 @@
 export type AppModule =
   | "menu"
   | "ordering"
+  | "kitchen"
   | "inventory"
   | "finance"
   | "hr";
 export type OrgType = "cafe" | "restaurant" | "other";
-export type MemberRole = "owner" | "manager" | "cashier";
+export type MemberRole = "owner" | "manager" | "cashier" | "waiter";
+
+export const STAFF_ROLES: Exclude<MemberRole, "owner">[] = [
+  "cashier",
+  "waiter",
+  "manager",
+];
+
+export const STAFF_ROLE_LABELS: Record<Exclude<MemberRole, "owner">, string> = {
+  cashier: "Cashier",
+  waiter: "Waiter",
+  manager: "Manager",
+};
+
+/** Auth user_metadata key for staff job role (supports waiter before/without DB enum). */
+export const APP_STAFF_ROLE_META = "app_staff_role";
+
+export function resolveStaffRole(
+  dbRole: string | null | undefined,
+  meta?: Record<string, unknown> | null,
+): MemberRole {
+  const fromMeta = meta?.[APP_STAFF_ROLE_META];
+  if (
+    fromMeta === "waiter" ||
+    fromMeta === "cashier" ||
+    fromMeta === "manager" ||
+    fromMeta === "owner"
+  ) {
+    return fromMeta;
+  }
+  if (
+    dbRole === "owner" ||
+    dbRole === "manager" ||
+    dbRole === "cashier" ||
+    dbRole === "waiter"
+  ) {
+    return dbRole;
+  }
+  return "cashier";
+}
+
+export type SaleOrderStatus =
+  | "placed"
+  | "preparing"
+  | "ready"
+  | "completed"
+  | "canceled";
 export type SubStatus =
   | "trialing"
   | "active"
@@ -72,7 +119,9 @@ export interface Membership {
   role: MemberRole;
   can_order?: boolean;
   can_menu?: boolean;
+  can_kitchen?: boolean;
   can_inventory?: boolean;
+  can_inventory_issue?: boolean;
   can_finance?: boolean;
   can_billing?: boolean;
   can_manage_staff?: boolean;
@@ -88,6 +137,7 @@ export interface Subscription {
   finance_enabled: boolean;
   menu_enabled?: boolean;
   ordering_enabled?: boolean;
+  kitchen_enabled?: boolean;
   hr_enabled?: boolean;
   trial_ends_at: string;
   current_period_end: string | null;
@@ -158,20 +208,33 @@ export function moduleFlag(
 ): boolean {
   switch (module) {
     case "menu":
-      return sub.menu_enabled ?? sub.inventory_enabled;
+      return Boolean(sub.menu_enabled ?? sub.inventory_enabled);
     case "ordering":
-      return sub.ordering_enabled ?? sub.inventory_enabled;
+      return Boolean(sub.ordering_enabled ?? sub.inventory_enabled);
+    case "kitchen":
+      // Explicit kitchen flag only — do not inherit ordering unless unset (null/undefined).
+      if (sub.kitchen_enabled === undefined || sub.kitchen_enabled === null) {
+        return Boolean(sub.ordering_enabled ?? sub.inventory_enabled);
+      }
+      return Boolean(sub.kitchen_enabled);
     case "inventory":
-      return sub.inventory_enabled;
+      return Boolean(sub.inventory_enabled);
     case "finance":
-      return sub.finance_enabled;
+      return Boolean(sub.finance_enabled);
     case "hr":
-      return sub.hr_enabled ?? true;
+      // Explicit false stays off; null/undefined defaults on (seats always needed).
+      return sub.hr_enabled !== false;
     default:
       return false;
   }
 }
 
+/**
+ * Module is usable only when:
+ * 1) org is approved by platform admin, AND
+ * 2) subscription is live (active trial OR paid period not expired), AND
+ * 3) that module flag is enabled on the subscription (set by admin at trial/payment).
+ */
 export function moduleEnabled(
   sub: Subscription,
   module: AppModule,
@@ -213,7 +276,16 @@ export function accessWarningLevel(sub: Subscription): AccessWarningLevel {
 export const APP_MODULE_LABELS: Record<AppModule, string> = {
   menu: "Menu",
   ordering: "Ordering",
+  kitchen: "Kitchen",
   inventory: "Inventory",
   finance: "Finance",
   hr: "HR / Staff",
+};
+
+export const SALE_ORDER_STATUS_LABELS: Record<SaleOrderStatus, string> = {
+  placed: "Placed",
+  preparing: "Preparing",
+  ready: "Ready",
+  completed: "Completed",
+  canceled: "Canceled",
 };

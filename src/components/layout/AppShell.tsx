@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3,
+  ChefHat,
   ClipboardList,
   CreditCard,
   LayoutGrid,
@@ -48,10 +49,13 @@ export function AppShell({
     ...(hasFeature("order")
       ? [{ href: "/app/order", label: "Order", icon: ShoppingCart }]
       : []),
+    ...(hasFeature("kitchen")
+      ? [{ href: "/app/kitchen", label: "Kitchen", icon: ChefHat }]
+      : []),
     ...(hasFeature("menu")
       ? [{ href: "/app/menu", label: "Menu", icon: ClipboardList }]
       : []),
-    ...(hasFeature("inventory")
+    ...(hasFeature("inventory") || hasFeature("inventory_issue")
       ? [{ href: "/app/inventory", label: "Inventory", icon: Package }]
       : []),
     ...(hasFeature("finance")

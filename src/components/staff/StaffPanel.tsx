@@ -16,14 +16,22 @@ import {
   defaultPermissionsForRole,
   type StaffPermissions,
 } from "@/lib/permissions";
+import {
+  STAFF_ROLE_LABELS,
+  STAFF_ROLES,
+  type MemberRole,
+} from "@/lib/tenant";
 import { cn } from "@/lib/utils";
 
 type PermKey = keyof StaffPermissions;
+type StaffRole = Exclude<MemberRole, "owner">;
 
 const PERM_KEYS: PermKey[] = [
   "can_order",
   "can_menu",
+  "can_kitchen",
   "can_inventory",
+  "can_inventory_issue",
   "can_finance",
   "can_billing",
   "can_manage_staff",
@@ -32,7 +40,9 @@ const PERM_KEYS: PermKey[] = [
 const PERM_TO_FEATURE: Record<PermKey, keyof typeof STAFF_FEATURE_LABELS> = {
   can_order: "order",
   can_menu: "menu",
+  can_kitchen: "kitchen",
   can_inventory: "inventory",
+  can_inventory_issue: "inventory_issue",
   can_finance: "finance",
   can_billing: "billing",
   can_manage_staff: "staff",
@@ -56,7 +66,7 @@ export function StaffPanel() {
     fullName: string;
   } | null>(null);
 
-  const [role, setRole] = useState<"manager" | "cashier">("cashier");
+  const [role, setRole] = useState<StaffRole>("cashier");
   const [perms, setPerms] = useState<StaffPermissions>(emptyPerms);
 
   const reload = useCallback(async () => {
@@ -135,12 +145,17 @@ export function StaffPanel() {
     await reload();
   }
 
-  async function savePerms(row: StaffMemberRow, next: StaffPermissions) {
+  async function savePerms(
+    row: StaffMemberRow,
+    next: StaffPermissions,
+    nextRole?: StaffRole,
+  ) {
     setBusy(true);
     setError(null);
     const result = await updateStaffPermissionsAction({
       membershipId: row.membershipId,
       permissions: next,
+      ...(nextRole ? { role: nextRole } : {}),
     });
     setBusy(false);
     if ("error" in result) {
@@ -325,14 +340,21 @@ export function StaffPanel() {
             <span className="mb-1 block text-ink/60">Role</span>
             <select
               value={role}
-              onChange={(e) =>
-                setRole(e.target.value as "manager" | "cashier")
-              }
+              onChange={(e) => setRole(e.target.value as StaffRole)}
               className="w-full rounded-xl border border-ink/10 bg-stone/40 px-3 py-2.5 outline-none ring-teal/30 focus:ring-2 sm:max-w-xs"
             >
-              <option value="cashier">Cashier</option>
-              <option value="manager">Manager</option>
+              {STAFF_ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {STAFF_ROLE_LABELS[r]}
+                </option>
+              ))}
             </select>
+            {role === "waiter" ? (
+              <p className="mt-1.5 text-xs text-ink/50">
+                Waiters place orders and mark them complete — no printing or
+                cancel requests.
+              </p>
+            ) : null}
           </label>
 
           <fieldset className="rounded-2xl border border-ink/8 bg-stone/30 p-4">
@@ -376,7 +398,7 @@ export function StaffPanel() {
         <h3 className="font-display text-xl text-ink">Team</h3>
         {staff.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-ink/15 px-4 py-8 text-center text-sm text-ink/50">
-            No accounts yet — add your first cashier or manager above.
+            No accounts yet — add your first cashier, waiter, or manager above.
           </p>
         ) : (
           staff.map((row) => (
@@ -386,7 +408,9 @@ export function StaffPanel() {
               busy={busy}
               onToggleActive={() => void toggleActive(row)}
               onResetPassword={() => void resetPassword(row)}
-              onSavePerms={(next) => void savePerms(row, next)}
+              onSavePerms={(next, nextRole) =>
+                void savePerms(row, next, nextRole)
+              }
             />
           ))
         )}
@@ -406,14 +430,18 @@ function StaffCard({
   busy: boolean;
   onToggleActive: () => void;
   onResetPassword: () => void;
-  onSavePerms: (p: StaffPermissions) => void;
+  onSavePerms: (p: StaffPermissions, role?: StaffRole) => void;
 }) {
   const [local, setLocal] = useState(row.permissions);
+  const [localRole, setLocalRole] = useState<StaffRole>(
+    row.role === "owner" ? "cashier" : (row.role as StaffRole),
+  );
   const isOwner = row.role === "owner";
 
   useEffect(() => {
     setLocal(row.permissions);
-  }, [row.permissions]);
+    if (row.role !== "owner") setLocalRole(row.role as StaffRole);
+  }, [row.permissions, row.role]);
 
   return (
     <article
@@ -426,7 +454,10 @@ function StaffCard({
         <div>
           <h4 className="font-display text-lg text-ink">{row.fullName}</h4>
           <p className="text-sm text-ink/55">
-            {row.email || "—"} · {row.role}
+            {row.email || "—"} ·{" "}
+            {row.role === "owner"
+              ? "owner"
+              : STAFF_ROLE_LABELS[row.role as StaffRole] || row.role}
             {!row.active ? " · inactive" : ""}
           </p>
         </div>
@@ -462,7 +493,31 @@ function StaffCard({
       </div>
 
       {!isOwner ? (
-        <div className="mt-4">
+        <div className="mt-4 space-y-3">
+          <label className="block text-sm">
+            <span className="mb-1 block text-ink/60">Role</span>
+            <select
+              value={localRole}
+              disabled={busy || !row.active}
+              onChange={(e) => {
+                const next = e.target.value as StaffRole;
+                setLocalRole(next);
+                setLocal(defaultPermissionsForRole(next));
+              }}
+              className="w-full max-w-xs rounded-xl border border-ink/10 bg-stone/40 px-3 py-2 text-sm outline-none ring-teal/30 focus:ring-2"
+            >
+              {STAFF_ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {STAFF_ROLE_LABELS[r]}
+                </option>
+              ))}
+            </select>
+            {localRole === "waiter" ? (
+              <p className="mt-1 text-xs text-ink/50">
+                Place &amp; complete orders only — no print or cancel.
+              </p>
+            ) : null}
+          </label>
           <div className="grid gap-2 sm:grid-cols-2">
             {PERM_KEYS.map((key) => (
               <label
@@ -485,10 +540,10 @@ function StaffCard({
           <button
             type="button"
             disabled={busy || !row.active}
-            onClick={() => onSavePerms(local)}
-            className="mt-3 rounded-xl bg-ink px-4 py-2 text-xs font-semibold text-stone disabled:opacity-50"
+            onClick={() => onSavePerms(local, localRole)}
+            className="rounded-xl bg-ink px-4 py-2 text-xs font-semibold text-stone disabled:opacity-50"
           >
-            Save permissions
+            Save role &amp; permissions
           </button>
         </div>
       ) : (

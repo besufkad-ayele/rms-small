@@ -1,11 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Minus, Plus, Printer, Trash2 } from "lucide-react";
+import { CheckCircle2, Minus, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import { type CloudMenuItem } from "@/lib/cloud-catalog";
-import { type CloudSaleOrder } from "@/lib/cloud-sales";
 import {
   completeSaleResilient,
   loadMenuResilient,
@@ -14,11 +13,10 @@ import type { MenuCategory, PaymentMethod } from "@/lib/tenant";
 import { MENU_CATEGORIES } from "@/lib/menu-categories";
 import { sortMenuByTags, tagLabel } from "@/lib/menu-tags";
 import { cn, formatMoney } from "@/lib/utils";
-import { ThermalReceipt } from "@/components/order/ThermalReceipt";
 
 type CartLine = { menuItem: CloudMenuItem; quantity: number };
 
-export function OrderPOS() {
+export function OrderPOS({ onPlaced }: { onPlaced?: () => void }) {
   const { tenant } = useAuth();
   const { refreshPendingCount } = useOfflineSync();
   const orgId = tenant!.organization.id;
@@ -27,10 +25,12 @@ export function OrderPOS() {
   const [category, setCategory] = useState<MenuCategory | "all">("all");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [paymentReference, setPaymentReference] = useState("");
+  const [placeLabel, setPlaceLabel] = useState("");
+  const [kitchenNote, setKitchenNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [queuedNote, setQueuedNote] = useState<string | null>(null);
-  const [lastSale, setLastSale] = useState<CloudSaleOrder | null>(null);
+  const [placedNote, setPlacedNote] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setMenu(await loadMenuResilient(orgId, setMenu));
@@ -82,6 +82,7 @@ export function OrderPOS() {
     setBusy(true);
     setError(null);
     setQueuedNote(null);
+    setPlacedNote(null);
     try {
       const { order, offlineQueued } = await completeSaleResilient({
         orgId,
@@ -89,17 +90,25 @@ export function OrderPOS() {
         paymentMethod,
         paymentReference,
         cashierName: tenant.profile.full_name,
+        placeLabel,
+        kitchenNote,
       });
-      setLastSale(order);
       setCart([]);
       setPaymentReference("");
+      setPlaceLabel("");
+      setKitchenNote("");
       if (offlineQueued) {
         setQueuedNote(
           "Saved on this device. Will sync when the connection is fast enough.",
         );
         await refreshPendingCount();
       }
+      setPlacedNote(
+        `${order.receipt_number} placed${order.place_label ? ` · ${order.place_label}` : ""}. Print or manage it under Placed orders.`,
+      );
       await reload();
+      // Move cashier to the placed-orders list
+      window.setTimeout(() => onPlaced?.(), 600);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Sale failed");
     } finally {
@@ -107,32 +116,17 @@ export function OrderPOS() {
     }
   }
 
-  useEffect(() => {
-    if (!lastSale) return;
-    const t = window.setTimeout(() => window.print(), 250);
-    return () => window.clearTimeout(t);
-  }, [lastSale]);
-
-  if (lastSale && tenant) {
-    return (
-      <ThermalReceipt
-        order={lastSale}
-        businessName={tenant.organization.name}
-        phone={tenant.organization.phone}
-        address={tenant.organization.address}
-        onDone={() => {
-          setLastSale(null);
-          setQueuedNote(null);
-        }}
-      />
-    );
-  }
-
   return (
     <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
       {queuedNote ? (
         <p className="col-span-full rounded-2xl border border-gold/40 bg-gold/15 px-4 py-3 text-sm text-ink">
           {queuedNote}
+        </p>
+      ) : null}
+      {placedNote ? (
+        <p className="col-span-full flex items-center gap-2 rounded-2xl border border-teal/30 bg-teal/10 px-4 py-3 text-sm text-ink">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-teal" />
+          {placedNote}
         </p>
       ) : null}
       <section className="rounded-3xl border border-ink/8 bg-white/80 p-3 sm:p-5">
@@ -159,6 +153,20 @@ export function OrderPOS() {
               onClick={() => addItem(item)}
               className="rounded-2xl border border-ink/8 bg-stone/60 p-3 text-left transition hover:border-teal/40 hover:bg-teal/5 active:scale-[0.98]"
             >
+              <div className="mb-2 aspect-[4/3] w-full overflow-hidden rounded-xl bg-ink/5">
+                {item.image_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={item.image_url}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-[10px] text-ink/35">
+                    No photo
+                  </div>
+                )}
+              </div>
               <p className="font-medium leading-snug">{item.name}</p>
               {(item.tags || []).length > 0 ? (
                 <p className="mt-1 flex flex-wrap gap-1">
@@ -199,6 +207,16 @@ export function OrderPOS() {
               key={line.menuItem.id}
               className="flex items-center gap-2 rounded-2xl bg-white/5 px-3 py-2"
             >
+              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-white/10">
+                {line.menuItem.image_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={line.menuItem.image_url}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : null}
+              </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">
                   {line.menuItem.name}
@@ -249,6 +267,18 @@ export function OrderPOS() {
             <span className="text-stone/70">Subtotal</span>
             <span>{formatMoney(subtotal)}</span>
           </div>
+          <input
+            value={placeLabel}
+            onChange={(e) => setPlaceLabel(e.target.value)}
+            placeholder="Table / place (e.g. T3, Patio)"
+            className="w-full rounded-xl border border-white/15 bg-ink px-3 py-2.5 text-sm outline-none"
+          />
+          <input
+            value={kitchenNote}
+            onChange={(e) => setKitchenNote(e.target.value)}
+            placeholder="Kitchen note (optional)"
+            className="w-full rounded-xl border border-white/15 bg-ink px-3 py-2.5 text-sm outline-none"
+          />
           <select
             value={paymentMethod}
             onChange={(e) =>
@@ -280,8 +310,8 @@ export function OrderPOS() {
             onClick={() => void checkout()}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-teal px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
           >
-            <Printer className="h-4 w-4" />
-            {busy ? "Saving…" : "Charge & print receipt"}
+            <CheckCircle2 className="h-4 w-4" />
+            {busy ? "Placing…" : "Place order"}
           </button>
         </div>
       </section>

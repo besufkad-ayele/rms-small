@@ -34,6 +34,7 @@ export async function recordSaleLocally(
   }));
   const subtotal = orderLines.reduce((s, l) => s + l.line_total, 0);
   const bill = computeBill(subtotal);
+  // Offline uses default rates; cloud path applies org tax settings.
   const now = new Date();
   const receipt =
     input.localOrder?.receipt_number || (await nextLocalReceipt(input.orgId));
@@ -51,6 +52,13 @@ export async function recordSaleLocally(
     cashier_name: input.cashierName,
     note: null,
     day_key: dayKey(now),
+    status: "placed",
+    place_label: null,
+    kitchen_note: null,
+    canceled_at: null,
+    canceled_by: null,
+    vat_percent: bill.vatPercent,
+    service_percent: bill.servicePercent,
     created_at: now.toISOString(),
     lines: orderLines,
   };

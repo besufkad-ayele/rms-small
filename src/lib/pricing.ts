@@ -18,6 +18,7 @@ export type PackageRow = {
   monthly_price_etb: number;
   menu_enabled: boolean;
   ordering_enabled: boolean;
+  kitchen_enabled?: boolean;
   inventory_enabled: boolean;
   finance_enabled: boolean;
   hr_enabled: boolean;
@@ -49,6 +50,7 @@ export type AmountBreakdown = {
 export const PRICING_MODULES: AppModule[] = [
   "menu",
   "ordering",
+  "kitchen",
   "inventory",
   "finance",
   "hr",
@@ -58,6 +60,7 @@ export function packageModuleFlags(pkg: PackageRow): ModuleToggleMap {
   return {
     menu: pkg.menu_enabled,
     ordering: pkg.ordering_enabled,
+    kitchen: pkg.kitchen_enabled ?? pkg.ordering_enabled,
     inventory: pkg.inventory_enabled,
     finance: pkg.finance_enabled,
     hr: pkg.hr_enabled,
@@ -69,6 +72,7 @@ export function packageDbFlags(pkg: PackageRow) {
   return {
     menu_enabled: pkg.menu_enabled,
     ordering_enabled: pkg.ordering_enabled,
+    kitchen_enabled: pkg.kitchen_enabled ?? pkg.ordering_enabled,
     inventory_enabled: pkg.inventory_enabled,
     finance_enabled: pkg.finance_enabled,
     hr_enabled: pkg.hr_enabled,

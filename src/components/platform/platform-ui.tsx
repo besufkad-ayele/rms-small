@@ -10,6 +10,7 @@ import type { PaymentProofRow } from "@/app/platform/actions";
 export const MODULES: AppModule[] = [
   "menu",
   "ordering",
+  "kitchen",
   "inventory",
   "finance",
   "hr",
@@ -29,15 +30,20 @@ export function flagsFromSub(
   sub: Record<string, unknown> | null | undefined,
 ): ModuleState {
   const inv = Boolean(sub?.inventory_enabled ?? true);
+  const ordering =
+    sub?.ordering_enabled === undefined || sub?.ordering_enabled === null
+      ? inv
+      : Boolean(sub.ordering_enabled);
   return {
     menu:
       sub?.menu_enabled === undefined || sub?.menu_enabled === null
         ? inv
         : Boolean(sub.menu_enabled),
-    ordering:
-      sub?.ordering_enabled === undefined || sub?.ordering_enabled === null
-        ? inv
-        : Boolean(sub.ordering_enabled),
+    ordering,
+    kitchen:
+      sub?.kitchen_enabled === undefined || sub?.kitchen_enabled === null
+        ? ordering
+        : Boolean(sub.kitchen_enabled),
     inventory: inv,
     finance: Boolean(sub?.finance_enabled ?? true),
     hr:
@@ -56,6 +62,7 @@ export function flagsFromProof(proof: PaymentProofRow): ModuleState {
     return {
       menu: true,
       ordering: true,
+      kitchen: true,
       inventory: true,
       finance: true,
       hr: true,
@@ -64,6 +71,10 @@ export function flagsFromProof(proof: PaymentProofRow): ModuleState {
   return {
     menu: Boolean(proof.menu_enabled),
     ordering: Boolean(proof.ordering_enabled),
+    kitchen: Boolean(
+      (proof as { kitchen_enabled?: boolean | null }).kitchen_enabled ??
+        proof.ordering_enabled,
+    ),
     inventory: Boolean(proof.inventory_enabled),
     finance: Boolean(proof.finance_enabled),
     hr: Boolean(proof.hr_enabled),

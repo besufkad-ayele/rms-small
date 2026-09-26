@@ -224,8 +224,9 @@ export function InventoryManager() {
       {items.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-ink/15 bg-white/60 px-4 py-6 text-center">
           <p className="text-sm text-ink/60">
-            Your inventory starts empty. Add items below, or load sample data
-            once.
+            Inventory is empty. Add stock under{" "}
+            <span className="font-medium text-teal">Receive & suppliers</span>,
+            or load sample data once.
           </p>
           <button
             type="button"
@@ -243,138 +244,127 @@ export function InventoryManager() {
 
       <div className="grid gap-4 lg:grid-cols-[1fr_1.15fr]">
         <section className="rounded-3xl border border-ink/8 bg-white/80 p-4 sm:p-5">
-          <h2 className="font-display text-xl">
-            {editing ? "Update stock" : "Add inventory"}
-          </h2>
-          <p className="mt-1 text-sm text-ink/55">
-            Cost changes keep up to 12 past values
-          </p>
-          <form className="mt-4 space-y-3" onSubmit={(e) => void onSubmit(e)}>
-            <input
-              required
-              className="field"
-              placeholder="Name"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-            <div>
-              <label className="mb-1 block text-xs text-ink/55">Unit</label>
-              <select
-                required
-                className="field"
-                value={form.unit_id}
-                onChange={(e) => pickUnit(e.target.value)}
-              >
-                <option value="">Select unit…</option>
-                {grouped.map((g) => (
-                  <optgroup key={g.kind} label={g.label}>
-                    {g.units.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.label} ({u.code})
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="mt-1.5 text-xs font-medium text-teal underline"
-                onClick={() => setCustomOpen((o) => !o)}
-              >
-                {customOpen ? "Cancel custom unit" : "Add custom unit"}
-              </button>
-              {customOpen ? (
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <input
-                    className="field"
-                    placeholder="Code (e.g. sack)"
-                    value={customCode}
-                    onChange={(e) => setCustomCode(e.target.value)}
-                  />
-                  <input
-                    className="field"
-                    placeholder="Label"
-                    value={customLabel}
-                    onChange={(e) => setCustomLabel(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void addCustomUnit()}
-                    className="col-span-2 rounded-xl bg-ink py-2 text-sm text-stone"
-                  >
-                    Save unit
-                  </button>
-                </div>
-              ) : null}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block text-sm">
-                <span className="mb-1 block text-xs text-ink/55">
-                  Stock qty
-                </span>
+          {editing ? (
+            <>
+              <h2 className="font-display text-xl">Update item</h2>
+              <p className="mt-1 text-sm text-ink/55">
+                Adjust thresholds and cost. New stock goes through Receive.
+              </p>
+              <form className="mt-4 space-y-3" onSubmit={(e) => void onSubmit(e)}>
                 <input
                   required
-                  type="number"
-                  min={0}
-                  step="0.001"
                   className="field"
-                  value={form.stock_qty}
-                  onChange={(e) =>
-                    setForm({ ...form, stock_qty: Number(e.target.value) })
-                  }
+                  placeholder="Name"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
                 />
-              </label>
-              <label className="block text-sm">
-                <span className="mb-1 block text-xs text-ink/55">
-                  Low-stock alert
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.001"
-                  className="field"
-                  value={form.low_stock_threshold}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      low_stock_threshold: Number(e.target.value),
-                    })
-                  }
-                />
-              </label>
-            </div>
-            <label className="block text-sm">
-              <span className="mb-1 block text-xs text-ink/55">
-                Cost per {form.unit || "unit"} (ETB)
-              </span>
-              <input
-                required
-                type="number"
-                min={0}
-                step="0.01"
-                className="field"
-                value={form.cost_per_unit}
-                onChange={(e) =>
-                  setForm({ ...form, cost_per_unit: Number(e.target.value) })
-                }
-              />
-            </label>
-            <button
-              type="submit"
-              className="w-full rounded-xl bg-teal py-3 text-sm font-semibold text-white"
-            >
-              {editing ? "Save" : "Add item"}
-            </button>
-            {editing ? (
-              <button
-                type="button"
-                onClick={() => setEditing(null)}
-                className="w-full text-sm text-teal underline"
-              >
-                Cancel edit
-              </button>
-            ) : null}
-          </form>
+                <div>
+                  <label className="mb-1 block text-xs text-ink/55">Unit</label>
+                  <select
+                    required
+                    className="field"
+                    value={form.unit_id}
+                    onChange={(e) => pickUnit(e.target.value)}
+                  >
+                    <option value="">Select unit…</option>
+                    {grouped.map((g) => (
+                      <optgroup key={g.kind} label={g.label}>
+                        {g.units.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.label} ({u.code})
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-xs text-ink/55">
+                      Stock qty
+                    </span>
+                    <input
+                      required
+                      type="number"
+                      min={0}
+                      step="0.001"
+                      className="field"
+                      value={form.stock_qty}
+                      onChange={(e) =>
+                        setForm({ ...form, stock_qty: Number(e.target.value) })
+                      }
+                    />
+                  </label>
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-xs text-ink/55">
+                      Low-stock alert
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.001"
+                      className="field"
+                      value={form.low_stock_threshold}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          low_stock_threshold: Number(e.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-xs text-ink/55">
+                    Cost per {form.unit || "unit"} (ETB)
+                  </span>
+                  <input
+                    required
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    className="field"
+                    value={form.cost_per_unit}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        cost_per_unit: Number(e.target.value),
+                      })
+                    }
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="w-full rounded-xl bg-teal py-3 text-sm font-semibold text-white"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditing(null)}
+                  className="w-full text-sm text-teal underline"
+                >
+                  Cancel edit
+                </button>
+              </form>
+            </>
+          ) : (
+            <>
+              <h2 className="font-display text-xl">Details</h2>
+              <p className="mt-2 text-sm text-ink/60">
+                This dashboard shows stock, value, expiry, and alerts. To{" "}
+                <strong>add or receive</strong> inventory (quantity, supplier,
+                cost, measurement), use{" "}
+                <span className="font-medium text-teal">Receive & suppliers</span>
+                . Issuers take stock out under{" "}
+                <span className="font-medium text-teal">Issue / take-out</span>.
+              </p>
+              <p className="mt-3 text-sm text-ink/50">
+                Tap an item on the stock board for full detail, or use the pencil
+                to adjust thresholds and cost.
+              </p>
+            </>
+          )}
         </section>
 
         <section className="rounded-3xl border border-ink/8 bg-white/80 p-4 sm:p-5">
@@ -404,6 +394,7 @@ export function InventoryManager() {
                         {item.stock_qty} {item.unit} ·{" "}
                         {formatMoney(Number(item.cost_per_unit))}/{item.unit} ·
                         low ≤ {item.low_stock_threshold} {item.unit}
+                        {item.expiry_date ? ` · exp ${item.expiry_date}` : ""}
                       </p>
                     </button>
                     <button
@@ -466,6 +457,13 @@ export function InventoryManager() {
                 <dt className="text-xs text-ink/50">Low-stock threshold</dt>
                 <dd className="font-medium">
                   {detailFor.low_stock_threshold} {detailFor.unit}
+                </dd>
+              </div>
+              <div className="rounded-xl bg-stone/60 px-3 py-2">
+                <dt className="text-xs text-ink/50">Buy / expiry</dt>
+                <dd className="font-medium">
+                  {detailFor.last_purchased_at || "—"} /{" "}
+                  {detailFor.expiry_date || "—"}
                 </dd>
               </div>
               <div className="rounded-xl bg-stone/60 px-3 py-2">

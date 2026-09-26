@@ -8,6 +8,7 @@ import type {
   TenantContext,
   TenantLoadResult,
 } from "@/lib/tenant";
+import { resolveStaffRole } from "@/lib/tenant";
 
 const TRIAL_DAYS = Number(process.env.NEXT_PUBLIC_TRIAL_DAYS || 14);
 
@@ -214,7 +215,13 @@ export async function loadTenantDetailed(): Promise<TenantLoadResult> {
       tenant: {
         profile: profile as Profile,
         organization: organization as Organization,
-        membership: membership as Membership,
+        membership: {
+          ...(membership as Membership),
+          role: resolveStaffRole(
+            (membership as Membership).role,
+            user.user_metadata as Record<string, unknown> | undefined,
+          ),
+        },
         subscription: subscription as Subscription,
       },
       hasMembership: true,
@@ -352,37 +359,21 @@ export async function onboardOrganization(input: {
 export type ModuleFlags = {
   menuEnabled: boolean;
   orderingEnabled: boolean;
+  kitchenEnabled: boolean;
   inventoryEnabled: boolean;
   financeEnabled: boolean;
   hrEnabled: boolean;
 };
 
 export async function updateModules(
-  input: { organizationId: string } & ModuleFlags,
+  _input: { organizationId: string } & ModuleFlags,
 ) {
-  if (
-    !input.menuEnabled &&
-    !input.orderingEnabled &&
-    !input.inventoryEnabled &&
-    !input.financeEnabled &&
-    !input.hrEnabled
-  ) {
-    return { error: "Keep at least one module enabled." };
-  }
-  const supabase = createClient();
-  const { error } = await supabase
-    .from("subscriptions")
-    .update({
-      menu_enabled: input.menuEnabled,
-      ordering_enabled: input.orderingEnabled,
-      inventory_enabled: input.inventoryEnabled,
-      finance_enabled: input.financeEnabled,
-      hr_enabled: input.hrEnabled,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("organization_id", input.organizationId);
-  if (error) return { error: error.message };
-  return { ok: true };
+  // Module flags are set only by platform admin (trial start / payment approval).
+  // Owners request changes via payment proof — they cannot unlock modules themselves.
+  return {
+    error:
+      "Modules are controlled by Aramis. Request a package or modules below and wait for approval.",
+  };
 }
 
 export async function submitPaymentProof(input: {
@@ -426,6 +417,7 @@ export async function submitPaymentProof(input: {
     media_kind: isVideo ? "video" : "image",
     menu_enabled: input.modules?.menuEnabled ?? null,
     ordering_enabled: input.modules?.orderingEnabled ?? null,
+    kitchen_enabled: input.modules?.kitchenEnabled ?? null,
     inventory_enabled: input.modules?.inventoryEnabled ?? null,
     finance_enabled: input.modules?.financeEnabled ?? null,
     hr_enabled: input.modules?.hrEnabled ?? null,

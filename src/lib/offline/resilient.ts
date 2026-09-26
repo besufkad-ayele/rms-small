@@ -242,6 +242,8 @@ export async function completeSaleResilient(input: {
   paymentMethod: CompleteSalePayload["paymentMethod"];
   paymentReference?: string;
   cashierName: string;
+  placeLabel?: string;
+  kitchenNote?: string;
 }): Promise<{ order: CloudSaleOrder; offlineQueued: boolean }> {
   const payload: CompleteSalePayload = {
     orgId: input.orgId,

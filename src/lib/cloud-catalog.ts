@@ -10,6 +10,9 @@ export interface CloudInventoryItem {
   stock_qty: number;
   low_stock_threshold: number;
   cost_per_unit: number;
+  expiry_date?: string | null;
+  last_purchased_at?: string | null;
+  default_supplier_id?: string | null;
   updated_at: string;
   cost_history?: { cost_per_unit: number; recorded_at: string; note: string | null }[];
 }
@@ -23,6 +26,7 @@ export interface CloudMenuItem {
   available: boolean;
   description: string;
   tags?: string[];
+  image_url?: string | null;
   vote_count: number;
   updated_at?: string;
   recipe?: { inventory_item_id: string; quantity_required: number }[];
@@ -106,7 +110,7 @@ export async function upsertInventory(
     low_stock_threshold: number;
     cost_per_unit: number;
   },
-) {
+): Promise<string> {
   const supabase = createClient();
   const payload = {
     organization_id: orgId,
@@ -125,10 +129,15 @@ export async function upsertInventory(
       .eq("id", input.id)
       .eq("organization_id", orgId);
     if (error) throw new Error(error.message);
-    return;
+    return input.id;
   }
-  const { error } = await supabase.from("inventory_items").insert(payload);
-  if (error) throw new Error(error.message);
+  const { data, error } = await supabase
+    .from("inventory_items")
+    .insert(payload)
+    .select("id")
+    .single();
+  if (error || !data) throw new Error(error?.message || "Create failed");
+  return data.id as string;
 }
 
 export async function deleteInventory(orgId: string, id: string) {
@@ -182,24 +191,31 @@ export async function upsertMenu(
     available: boolean;
     description: string;
     tags?: string[];
+    image_url?: string | null;
     recipe: { inventory_item_id: string; quantity_required: number }[];
   },
 ) {
   const supabase = createClient();
   const tags = (input.tags || []).map((t) => t.trim().toLowerCase()).filter(Boolean);
   let menuId = input.id;
+  const base = {
+    name: input.name.trim(),
+    category: input.category,
+    price: input.price,
+    available: input.available,
+    description: input.description.trim(),
+    tags,
+    updated_at: new Date().toISOString(),
+  };
+  const withImage =
+    input.image_url !== undefined
+      ? { ...base, image_url: input.image_url }
+      : base;
+
   if (menuId) {
     const { error } = await supabase
       .from("menu_items")
-      .update({
-        name: input.name.trim(),
-        category: input.category,
-        price: input.price,
-        available: input.available,
-        description: input.description.trim(),
-        tags,
-        updated_at: new Date().toISOString(),
-      })
+      .update(withImage)
       .eq("id", menuId)
       .eq("organization_id", orgId);
     if (error) throw new Error(error.message);
@@ -209,12 +225,7 @@ export async function upsertMenu(
       .from("menu_items")
       .insert({
         organization_id: orgId,
-        name: input.name.trim(),
-        category: input.category,
-        price: input.price,
-        available: input.available,
-        description: input.description.trim(),
-        tags,
+        ...withImage,
       })
       .select("id")
       .single();
@@ -232,6 +243,7 @@ export async function upsertMenu(
     );
     if (error) throw new Error(error.message);
   }
+  return menuId as string;
 }
 
 export async function deleteMenu(orgId: string, id: string) {

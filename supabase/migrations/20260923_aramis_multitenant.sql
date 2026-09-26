@@ -4,7 +4,7 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TYPE public.org_type AS ENUM ('cafe', 'restaurant', 'other');
-CREATE TYPE public.member_role AS ENUM ('owner', 'manager', 'cashier');
+CREATE TYPE public.member_role AS ENUM ('owner', 'manager', 'cashier', 'waiter');
 CREATE TYPE public.sub_status AS ENUM ('trialing', 'active', 'past_due', 'canceled', 'expired');
 CREATE TYPE public.proof_status AS ENUM ('pending', 'approved', 'rejected');
 CREATE TYPE public.payment_method AS ENUM ('cash', 'cbe', 'telebirr', 'other');

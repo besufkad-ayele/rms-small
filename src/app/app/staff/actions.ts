@@ -8,6 +8,7 @@ import {
   type StaffPermissions,
 } from "@/lib/permissions";
 import type { MemberRole, Subscription } from "@/lib/tenant";
+import { APP_STAFF_ROLE_META, resolveStaffRole } from "@/lib/tenant";
 
 export type StaffMemberRow = {
   membershipId: string;
@@ -20,6 +21,86 @@ export type StaffMemberRow = {
   permissions: StaffPermissions;
   createdAt: string;
 };
+
+/** Persist role to DB; waiter falls back to cashier if enum not migrated yet. */
+async function writeMembershipRole(
+  admin: ReturnType<typeof createAdminClient>,
+  opts: {
+    organizationId: string;
+    userId: string;
+    membershipId?: string;
+    role: Exclude<MemberRole, "owner">;
+    perms: StaffPermissions;
+    invitedBy?: string;
+  },
+): Promise<{ error: string } | { ok: true; membershipId?: string }> {
+  const payload = {
+    role: opts.role as string,
+    ...opts.perms,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (opts.membershipId) {
+    let { error } = await admin
+      .from("memberships")
+      .update(payload)
+      .eq("id", opts.membershipId);
+    if (
+      error &&
+      opts.role === "waiter" &&
+      /waiter|invalid input value|enum/i.test(error.message)
+    ) {
+      ({ error } = await admin
+        .from("memberships")
+        .update({ ...payload, role: "cashier" })
+        .eq("id", opts.membershipId));
+    }
+    if (error) return { error: error.message };
+    return { ok: true };
+  }
+
+  let { error } = await admin.from("memberships").insert({
+    organization_id: opts.organizationId,
+    user_id: opts.userId,
+    role: opts.role,
+    ...opts.perms,
+    active: true,
+    invited_by: opts.invitedBy ?? null,
+  });
+  if (
+    error &&
+    opts.role === "waiter" &&
+    /waiter|invalid input value|enum/i.test(error.message)
+  ) {
+    ({ error } = await admin.from("memberships").insert({
+      organization_id: opts.organizationId,
+      user_id: opts.userId,
+      role: "cashier",
+      ...opts.perms,
+      active: true,
+      invited_by: opts.invitedBy ?? null,
+    }));
+  }
+  if (error) return { error: error.message };
+  return { ok: true };
+}
+
+async function setAppStaffRoleMeta(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  role: Exclude<MemberRole, "owner">,
+  extra?: Record<string, unknown>,
+) {
+  const { data } = await admin.auth.admin.getUserById(userId);
+  const prev = (data.user?.user_metadata || {}) as Record<string, unknown>;
+  await admin.auth.admin.updateUserById(userId, {
+    user_metadata: {
+      ...prev,
+      ...extra,
+      [APP_STAFF_ROLE_META]: role,
+    },
+  });
+}
 
 async function requireOrgOwner(): Promise<
   | {
@@ -116,7 +197,10 @@ export async function listStaffAction(): Promise<
     staff.push({
       membershipId: m.id,
       userId: m.user_id,
-      role: m.role,
+      role: resolveStaffRole(
+        m.role,
+        authUser.user?.user_metadata as Record<string, unknown> | undefined,
+      ),
       active: m.active !== false,
       fullName: profile?.full_name || "Team member",
       email: authUser.user?.email || profile?.email || null,
@@ -182,6 +266,7 @@ export async function createStaffAction(input: {
       full_name: fullName,
       phone: input.phone?.trim() || null,
       staff_of: organizationId,
+      [APP_STAFF_ROLE_META]: input.role,
     },
   });
   if (createErr || !created.user) {
@@ -198,17 +283,16 @@ export async function createStaffAction(input: {
     updated_at: new Date().toISOString(),
   });
 
-  const { error: memErr } = await admin.from("memberships").insert({
-    organization_id: organizationId,
-    user_id: userId,
+  const written = await writeMembershipRole(admin, {
+    organizationId,
+    userId,
     role: input.role,
-    ...perms,
-    active: true,
-    invited_by: user.id,
+    perms,
+    invitedBy: user.id,
   });
-  if (memErr) {
+  if ("error" in written) {
     await admin.auth.admin.deleteUser(userId);
-    return { error: memErr.message };
+    return { error: written.error };
   }
 
   return { ok: true, email, password, fullName };
@@ -235,10 +319,22 @@ export async function updateStaffPermissionsAction(input: {
   }
 
   const perms = permissionsFromFlags({ ...row, ...input.permissions });
+  if (input.role) {
+    await setAppStaffRoleMeta(admin, row.user_id, input.role);
+    const written = await writeMembershipRole(admin, {
+      organizationId,
+      userId: row.user_id,
+      membershipId: input.membershipId,
+      role: input.role,
+      perms,
+    });
+    if ("error" in written) return { error: written.error };
+    return { ok: true };
+  }
+
   const { error } = await admin
     .from("memberships")
     .update({
-      ...(input.role ? { role: input.role } : {}),
       ...perms,
       updated_at: new Date().toISOString(),
     })
@@ -326,3 +422,55 @@ export async function resetStaffPasswordAction(input: {
   if (error) return { error: error.message };
   return { ok: true, password: input.password };
 }
+
+export type StaffDirectoryPerson = {
+  userId: string;
+  fullName: string;
+  role: MemberRole;
+};
+
+/** Active org members for pickers (issue, assign, etc). Any active member can call. */
+export async function listOrgStaffDirectoryAction(): Promise<
+  { people: StaffDirectoryPerson[] } | { error: string }
+> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const admin = createAdminClient();
+  const { data: mine } = await admin
+    .from("memberships")
+    .select("organization_id, active")
+    .eq("user_id", user.id)
+    .eq("active", true)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (!mine) return { error: "No organization membership." };
+
+  const { data: rows, error } = await admin
+    .from("memberships")
+    .select("user_id, role, active")
+    .eq("organization_id", mine.organization_id)
+    .eq("active", true)
+    .order("created_at", { ascending: true });
+  if (error) return { error: error.message };
+
+  const people: StaffDirectoryPerson[] = [];
+  for (const m of rows || []) {
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("full_name")
+      .eq("id", m.user_id)
+      .maybeSingle();
+    people.push({
+      userId: m.user_id,
+      fullName: profile?.full_name || "Team member",
+      role: m.role as MemberRole,
+    });
+  }
+  return { people };
+}
+
