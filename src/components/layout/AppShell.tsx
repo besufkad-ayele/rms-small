@@ -85,15 +85,11 @@ export function AppShell({
     ...(hasFeature("finance")
       ? [{ href: "/app/reports", label: "Finance", icon: BarChart3 }]
       : []),
-    ...(owner
-      ? [
-          {
-            href: "/app/settings",
-            label: "Settings & Billing",
-            icon: Settings,
-          },
-        ]
-      : []),
+    {
+      href: "/app/settings",
+      label: owner ? "Settings & Billing" : "Settings",
+      icon: Settings,
+    },
     ...(hasFeature("staff")
       ? [{ href: "/app/staff", label: "Staff", icon: Users }]
       : []),

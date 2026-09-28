@@ -11,6 +11,8 @@ export type CloudInventorySupplier = {
   updated_at: string;
 };
 
+export type InventoryReceivePaymentStatus = "paid" | "credit";
+
 export type CloudInventoryMovement = {
   id: string;
   organization_id: string;
@@ -23,6 +25,8 @@ export type CloudInventoryMovement = {
   purchased_at: string | null;
   expires_at: string | null;
   cost_per_unit: number | null;
+  /** Stock-in only: fully paid or bought on credit. Null on issues / legacy rows. */
+  payment_status: InventoryReceivePaymentStatus | null;
   issued_by_user_id: string | null;
   issued_by_name: string | null;
   issued_at: string | null;
@@ -113,6 +117,8 @@ export async function receiveInventory(input: {
   purchasedAt: string;
   expiresAt: string;
   costPerUnit?: number;
+  /** Defaults to fully paid. */
+  paymentStatus?: InventoryReceivePaymentStatus;
   note?: string;
 }) {
   if (input.quantity <= 0) throw new Error("Quantity must be positive.");
@@ -131,6 +137,7 @@ export async function receiveInventory(input: {
     input.costPerUnit != null && input.costPerUnit >= 0
       ? input.costPerUnit
       : Number(inv.cost_per_unit);
+  const paymentStatus = input.paymentStatus ?? "paid";
 
   const { error: moveErr } = await supabase.from("inventory_movements").insert({
     organization_id: input.orgId,
@@ -143,6 +150,7 @@ export async function receiveInventory(input: {
     purchased_at: input.purchasedAt,
     expires_at: input.expiresAt,
     cost_per_unit: cost,
+    payment_status: paymentStatus,
     note: input.note?.trim() || "",
   });
   if (moveErr) throw new Error(moveErr.message);

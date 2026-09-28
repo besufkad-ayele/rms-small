@@ -21,12 +21,17 @@ import {
   type CloudSaleOrder,
 } from "@/lib/cloud-sales";
 import { formatBytes, MENU_IMAGE_MAX_BYTES } from "@/lib/menu-image";
+import {
+  DEFAULT_PAYMENT_METHODS,
+  enabledPaymentMethods,
+  getOrgPaymentMethods,
+  type OrgPaymentMethod,
+} from "@/lib/org-payment-methods";
 import { canCashierOrderOps, isOwner } from "@/lib/permissions";
 import { uploadSalePaymentProof } from "@/lib/sale-payment-proof";
 import {
   SALE_ORDER_STATUS_LABELS,
   SALE_PAYMENT_STATUS_LABELS,
-  type PaymentMethod,
   type SaleOrderStatus,
   type SalePaymentStatus,
 } from "@/lib/tenant";
@@ -47,11 +52,20 @@ export function CashierOrderBoard() {
   const [printOrder, setPrintOrder] = useState<CloudSaleOrder | null>(null);
   const [payDraft, setPayDraft] = useState<{
     orderId: string;
-    method: PaymentMethod;
+    method: string;
     reference: string;
   } | null>(null);
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [proofPreview, setProofPreview] = useState<string | null>(null);
+  const [payMethods, setPayMethods] = useState<OrgPaymentMethod[]>(
+    enabledPaymentMethods(DEFAULT_PAYMENT_METHODS),
+  );
+
+  useEffect(() => {
+    void getOrgPaymentMethods(orgId)
+      .then((m) => setPayMethods(enabledPaymentMethods(m)))
+      .catch(() => undefined);
+  }, [orgId]);
 
   const reload = useCallback(async () => {
     try {
@@ -290,6 +304,7 @@ export function CashierOrderBoard() {
                 busy={busyId === selected.id}
                 cashierOps={cashierOps}
                 owner={owner}
+                payMethods={payMethods}
                 payDraft={
                   payDraft?.orderId === selected.id ? payDraft : null
                 }
@@ -383,6 +398,7 @@ function OrderDetailPanel({
   busy,
   cashierOps,
   owner,
+  payMethods,
   payDraft,
   proofPreview,
   onPayDraftChange,
@@ -397,9 +413,10 @@ function OrderDetailPanel({
   busy: boolean;
   cashierOps: boolean;
   owner: boolean;
-  payDraft: { method: PaymentMethod; reference: string } | null;
+  payMethods: OrgPaymentMethod[];
+  payDraft: { method: string; reference: string } | null;
   proofPreview: string | null;
-  onPayDraftChange: (method: PaymentMethod, reference: string) => void;
+  onPayDraftChange: (method: string, reference: string) => void;
   onProofPicked: (file: File | null) => void;
   onClearProof: () => void;
   onMarkPaid: () => void;
@@ -410,8 +427,18 @@ function OrderDetailPanel({
   const lines = order.sale_order_lines || order.lines || [];
   const paid = isOrderPaid(order);
   const showProof = Boolean(order.payment_proof_url) && (owner || cashierOps);
+  const methodOptions =
+    payMethods.length > 0
+      ? payMethods
+      : enabledPaymentMethods(DEFAULT_PAYMENT_METHODS);
   const method = payDraft?.method ?? order.payment_method ?? "cash";
+  const safeMethod = methodOptions.some((m) => m.id === method)
+    ? method
+    : methodOptions[0]?.id ?? "cash";
   const reference = payDraft?.reference ?? order.payment_reference ?? "";
+  const paidLabel =
+    methodOptions.find((m) => m.id === order.payment_method)?.label ??
+    order.payment_method;
 
   return (
     <section
@@ -432,7 +459,7 @@ function OrderDetailPanel({
           <p className="mt-0.5 text-xs text-ink/45">
             {order.cashier_name}
             {paid
-              ? ` · ${order.payment_method.toUpperCase()}${
+              ? ` · ${paidLabel}${
                   order.payment_reference
                     ? ` · ${order.payment_reference}`
                     : ""
@@ -526,22 +553,23 @@ function OrderDetailPanel({
         <div className="mt-4 space-y-2 rounded-2xl border border-gold/30 bg-gold/10 p-3">
           <p className="text-xs font-semibold text-ink/70">Mark as paid</p>
           <select
-            value={method}
+            value={safeMethod}
             onChange={(e) =>
-              onPayDraftChange(e.target.value as PaymentMethod, reference)
+              onPayDraftChange(e.target.value, reference)
             }
             className="w-full rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm outline-none"
           >
-            <option value="cash">Cash</option>
-            <option value="cbe">CBE</option>
-            <option value="telebirr">Telebirr</option>
-            <option value="other">Other</option>
+            {methodOptions.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
           </select>
-          {method !== "cash" ? (
+          {safeMethod !== "cash" ? (
             <>
               <input
                 value={reference}
-                onChange={(e) => onPayDraftChange(method, e.target.value)}
+                onChange={(e) => onPayDraftChange(safeMethod, e.target.value)}
                 placeholder="Reference / transaction ID"
                 className="w-full rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm outline-none"
               />

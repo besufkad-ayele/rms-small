@@ -9,6 +9,7 @@ import {
   Monitor,
   Sun,
   UserRound,
+  Wallet,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { BillingPanel } from "@/components/billing/BillingPanel";
@@ -19,51 +20,81 @@ import {
   updateMyProfile,
   updateOrganizationProfile,
 } from "@/lib/cloud-auth";
+import {
+  DEFAULT_PAYMENT_METHODS,
+  PAYMENT_KIND_LABELS,
+  getOrgPaymentMethods,
+  saveOrgPaymentMethods,
+  slugPaymentId,
+  type OrgPaymentMethod,
+  type PaymentKind,
+} from "@/lib/org-payment-methods";
+import { isOwner } from "@/lib/permissions";
 import type { ThemeMode } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
-type SettingsTab = "appearance" | "profile" | "business" | "billing";
-
-const TABS: {
-  id: SettingsTab;
-  label: string;
-  icon: typeof Sun;
-}[] = [
-  { id: "appearance", label: "Appearance", icon: Sun },
-  { id: "profile", label: "Profile", icon: UserRound },
-  { id: "business", label: "Business", icon: Building2 },
-  { id: "billing", label: "Billing", icon: CreditCard },
-];
+type SettingsTab =
+  | "appearance"
+  | "profile"
+  | "payments"
+  | "business"
+  | "billing";
 
 export function SettingsPanel() {
+  const { tenant } = useAuth();
+  const owner = tenant ? isOwner(tenant.membership) : false;
   const search = useSearchParams();
+
+  const tabs = useMemo(() => {
+    const list: {
+      id: SettingsTab;
+      label: string;
+      icon: typeof Sun;
+    }[] = [
+      { id: "appearance", label: "Appearance", icon: Sun },
+      { id: "profile", label: "Profile", icon: UserRound },
+    ];
+    if (owner) {
+      list.push(
+        { id: "payments", label: "Payments", icon: Wallet },
+        { id: "business", label: "Business", icon: Building2 },
+        { id: "billing", label: "Billing", icon: CreditCard },
+      );
+    }
+    return list;
+  }, [owner]);
+
   const initial = (search.get("tab") as SettingsTab) || "appearance";
   const [tab, setTab] = useState<SettingsTab>(
-    TABS.some((t) => t.id === initial) ? initial : "appearance",
+    tabs.some((t) => t.id === initial) ? initial : "appearance",
   );
 
   useEffect(() => {
     const q = search.get("tab") as SettingsTab | null;
-    if (q && TABS.some((t) => t.id === q)) setTab(q);
-  }, [search]);
+    if (q && tabs.some((t) => t.id === q)) setTab(q);
+    else if (!tabs.some((t) => t.id === tab)) setTab("appearance");
+  }, [search, tabs, tab]);
 
   return (
     <div className="space-y-4">
       <div>
         <h2 className="font-display text-2xl text-ink sm:text-3xl">
-          Settings & Billing
+          Settings{owner ? " & Billing" : ""}
         </h2>
         <p className="mt-1 text-sm text-ink/60">
-          Owner controls — theme, profile, business details, and subscription.
+          {owner
+            ? "Theme, profile, payment methods, business details, and subscription."
+            : "Your profile and password — ask your owner for payment or billing changes."}
         </p>
       </div>
 
-      <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} />
+      <SegmentedTabs tabs={tabs} value={tab} onChange={setTab} />
 
       {tab === "appearance" ? <AppearanceSettings /> : null}
       {tab === "profile" ? <ProfileSettings /> : null}
-      {tab === "business" ? <BusinessSettings /> : null}
-      {tab === "billing" ? <BillingPanel /> : null}
+      {tab === "payments" && owner ? <PaymentMethodsSettings /> : null}
+      {tab === "business" && owner ? <BusinessSettings /> : null}
+      {tab === "billing" && owner ? <BillingPanel /> : null}
     </div>
   );
 }
@@ -224,6 +255,9 @@ function ProfileSettings() {
 
       <section className="rounded-3xl border border-ink/8 bg-paper/90 p-4 sm:p-5">
         <h3 className="font-display text-xl">Change password</h3>
+        <p className="mt-1 text-sm text-ink/55">
+          You can update your own login password here anytime.
+        </p>
         <form
           className="mt-4 space-y-3"
           onSubmit={(e) => void onSavePassword(e)}
@@ -271,6 +305,196 @@ function ProfileSettings() {
         </p>
       ) : null}
     </div>
+  );
+}
+
+const ADD_KIND_OPTIONS: { id: PaymentKind; label: string }[] = [
+  { id: "bank", label: "Bank" },
+  { id: "telebirr", label: "Telebirr" },
+  { id: "cash", label: "Cash" },
+  { id: "other", label: "Other" },
+];
+
+function PaymentMethodsSettings() {
+  const { tenant } = useAuth();
+  const orgId = tenant!.organization.id;
+  const [methods, setMethods] = useState<OrgPaymentMethod[]>(
+    DEFAULT_PAYMENT_METHODS.methods.map((m) => ({ ...m })),
+  );
+  const [newLabel, setNewLabel] = useState("");
+  const [newKind, setNewKind] = useState<PaymentKind>("bank");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void getOrgPaymentMethods(orgId)
+      .then((m) => setMethods(m.methods.map((x) => ({ ...x }))))
+      .catch((e) =>
+        setError(e instanceof Error ? e.message : "Could not load methods"),
+      );
+  }, [orgId]);
+
+  function toggle(id: string) {
+    if (id === "cash") return;
+    setMethods((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, enabled: !m.enabled } : m)),
+    );
+  }
+
+  function removeMethod(id: string) {
+    if (id === "cash") return;
+    setMethods((prev) => prev.filter((m) => m.id !== id));
+  }
+
+  function addMethod() {
+    const label = newLabel.trim();
+    if (!label) {
+      setError("Enter a name for the payment option.");
+      return;
+    }
+    let id = slugPaymentId(label);
+    const used = new Set(methods.map((m) => m.id));
+    if (used.has(id)) id = `${id}-${Date.now().toString(36).slice(-4)}`;
+    setMethods((prev) => [
+      ...prev,
+      { id, label, kind: newKind, enabled: true },
+    ]);
+    setNewLabel("");
+    setError(null);
+    setMessage(null);
+  }
+
+  async function onSave(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const saved = await saveOrgPaymentMethods(orgId, { methods });
+      setMethods(saved.methods.map((x) => ({ ...x })));
+      setMessage("Payment methods saved — used when marking orders paid.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="rounded-3xl border border-ink/8 bg-paper/90 p-4 sm:p-5">
+      <h3 className="font-display text-xl">Payment methods</h3>
+      <p className="mt-1 text-sm text-ink/55">
+        Enable built-in tenders or add your own (Awash, CBE Birr, etc.). Assign
+        each to Cash, Banks, Telebirr, or Other so Finance can filter paid
+        orders. Screenshots still show in Finance.
+      </p>
+      <form className="mt-4 space-y-4" onSubmit={(e) => void onSave(e)}>
+        <ul className="space-y-2">
+          {methods.map((m) => {
+            const locked = m.id === "cash";
+            const custom = m.id.startsWith("custom-");
+            return (
+              <li key={m.id}>
+                <div
+                  className={cn(
+                    "flex items-center gap-3 rounded-2xl border px-4 py-3",
+                    m.enabled
+                      ? "border-teal/40 bg-teal/5"
+                      : "border-ink/10 bg-stone/30",
+                  )}
+                >
+                  <label
+                    className={cn(
+                      "flex min-w-0 flex-1 items-center gap-3",
+                      locked ? "cursor-default" : "cursor-pointer",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 shrink-0 accent-teal"
+                      checked={m.enabled}
+                      disabled={locked || busy}
+                      onChange={() => toggle(m.id)}
+                    />
+                    <span className="min-w-0">
+                      <span className="block font-medium">{m.label}</span>
+                      <span className="text-xs text-ink/45">
+                        {PAYMENT_KIND_LABELS[m.kind]}
+                        {custom ? " · custom" : ""}
+                      </span>
+                    </span>
+                  </label>
+                  {custom ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => removeMethod(m.id)}
+                      className="shrink-0 text-xs font-medium text-coral"
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+
+        <div className="rounded-2xl border border-dashed border-ink/15 bg-stone/20 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink/45">
+            Add your own
+          </p>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <input
+              value={newLabel}
+              onChange={(e) => setNewLabel(e.target.value)}
+              placeholder="e.g. Awash Bank"
+              disabled={busy}
+              className="min-w-0 flex-1 rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm outline-none"
+            />
+            <select
+              value={newKind}
+              onChange={(e) => setNewKind(e.target.value as PaymentKind)}
+              disabled={busy}
+              className="rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm outline-none"
+            >
+              {ADD_KIND_OPTIONS.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={addMethod}
+              className="rounded-xl border border-ink/15 bg-white px-4 py-2 text-sm font-semibold text-ink disabled:opacity-50"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          disabled={busy}
+          className="rounded-xl bg-teal px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          Save payment methods
+        </button>
+      </form>
+      {message ? (
+        <p className="mt-3 rounded-xl bg-teal/15 px-3 py-2 text-sm text-teal">
+          {message}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="mt-3 rounded-xl bg-coral/15 px-3 py-2 text-sm text-coral">
+          {error}
+        </p>
+      ) : null}
+    </section>
   );
 }
 

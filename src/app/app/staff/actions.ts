@@ -412,7 +412,10 @@ export async function resetStaffPasswordAction(input: {
     .maybeSingle();
   if (!row) return { error: "Staff member not found." };
   if (row.role === "owner") {
-    return { error: "Reset the owner password from account settings." };
+    return {
+      error:
+        "Owners change their own password in Settings → Profile (not from Staff).",
+    };
   }
 
   const { error } = await admin.auth.admin.updateUserById(row.user_id, {

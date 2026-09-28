@@ -99,7 +99,7 @@ export interface SaleOrder {
   serviceCharge: number;
   vat: number;
   total: number;
-  paymentMethod: PaymentMethod;
+  paymentMethod: string;
   paymentReference?: string;
   cashierName: string;
   note?: string;

@@ -26,6 +26,14 @@ import { ReceiptDesigner } from "@/components/finance/ReceiptDesigner";
 import { SparkLines } from "@/components/finance/SparkLines";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import {
+  getOrgPaymentMethods,
+  kindForMethodId,
+  labelForMethodId,
+  PAYMENT_KIND_LABELS,
+  type OrgPaymentMethod,
+  type PaymentKind,
+} from "@/lib/org-payment-methods";
+import {
   defaultDateFilter,
   filterLabel,
   type DateFilterState,
@@ -43,6 +51,15 @@ const PERIODS: { id: ReportPeriod; label: string }[] = [
 
 type ViewMode = "orders" | "items";
 type MainTab = "overall" | "daily" | "finance" | "spend" | "receipt";
+type PayKindFilter = "all" | PaymentKind;
+
+const PAY_KIND_FILTERS: { id: PayKindFilter; label: string }[] = [
+  { id: "all", label: "All tenders" },
+  { id: "cash", label: PAYMENT_KIND_LABELS.cash },
+  { id: "bank", label: PAYMENT_KIND_LABELS.bank },
+  { id: "telebirr", label: PAYMENT_KIND_LABELS.telebirr },
+  { id: "other", label: PAYMENT_KIND_LABELS.other },
+];
 
 const TABS: { id: MainTab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "overall", label: "Overall", icon: LayoutDashboard },
@@ -63,6 +80,8 @@ export function FinanceDashboardPanel() {
   const [draftFrom, setDraftFrom] = useState("");
   const [draftTo, setDraftTo] = useState("");
   const [view, setView] = useState<ViewMode>("orders");
+  const [payKind, setPayKind] = useState<PayKindFilter>("all");
+  const [payCatalog, setPayCatalog] = useState<OrgPaymentMethod[]>([]);
   const [dash, setDash] = useState<FinanceDashboard | null>(null);
   const [spend, setSpend] = useState<SpendDashboard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -75,9 +94,13 @@ export function FinanceDashboardPanel() {
     // Keep showing prior data while revalidating (no full-page skeleton flash).
     setLoading(true);
     try {
-      const s = await getSpendDashboard(orgId, filter);
+      const [s, methods] = await Promise.all([
+        getSpendDashboard(orgId, filter),
+        getOrgPaymentMethods(orgId),
+      ]);
       const d = await getFinanceDashboard(orgId, filter, s.spendByDay);
       setSpend(s);
+      setPayCatalog(methods.methods);
       setDash({
         ...d,
         priorSpend: s.priorPeriodSpent,
@@ -115,6 +138,24 @@ export function FinanceDashboardPanel() {
   }
 
   const usingCustom = Boolean(filter.fromDate || filter.toDate);
+
+  const filteredOrders = useMemo(() => {
+    const rows = dash?.byOrder ?? [];
+    if (payKind === "all") return rows;
+    return rows.filter(
+      (o) => kindForMethodId(o.paymentMethod, payCatalog) === payKind,
+    );
+  }, [dash?.byOrder, payKind, payCatalog]);
+
+  const filteredOrderTotals = useMemo(() => {
+    let total = 0;
+    let profit = 0;
+    for (const o of filteredOrders) {
+      total += o.total;
+      profit += o.grossProfit;
+    }
+    return { total, profit, count: filteredOrders.length };
+  }, [filteredOrders]);
 
   const revenue = dash?.revenue ?? 0;
   const cogs = dash?.cogs ?? 0;
@@ -165,8 +206,9 @@ export function FinanceDashboardPanel() {
             Date: o.createdAt,
             Day: o.dayKey,
             Cashier: o.cashier,
-            Payment: o.paymentMethod,
+            Payment: labelForMethodId(o.paymentMethod, payCatalog),
             Reference: o.paymentReference,
+            "Proof URL": o.paymentProofUrl || "",
             Items: o.itemsSummary,
             "Item qty": o.itemCount,
             Subtotal: o.subtotal,
@@ -587,6 +629,31 @@ export function FinanceDashboardPanel() {
             </div>
 
             {view === "orders" ? (
+              <>
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  {PAY_KIND_FILTERS.map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setPayKind(f.id)}
+                      className={cn(
+                        "rounded-full px-3 py-1.5 text-xs font-medium",
+                        payKind === f.id
+                          ? "bg-ink text-stone"
+                          : "bg-stone text-ink/65",
+                      )}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                  {payKind !== "all" ? (
+                    <span className="text-xs text-ink/50">
+                      {filteredOrderTotals.count} orders ·{" "}
+                      {formatMoney(filteredOrderTotals.total)} · profit{" "}
+                      {formatMoney(filteredOrderTotals.profit)}
+                    </span>
+                  ) : null}
+                </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full text-left text-sm">
                   <thead className="border-b border-ink/10 text-xs text-ink/50">
@@ -600,7 +667,7 @@ export function FinanceDashboardPanel() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(dash?.byOrder ?? []).map((o) => (
+                    {filteredOrders.map((o) => (
                       <Fragment key={o.orderId}>
                         <tr
                           className="cursor-pointer border-b border-ink/5 hover:bg-stone/40"
@@ -636,7 +703,7 @@ export function FinanceDashboardPanel() {
                               className="px-3 py-3 text-xs text-ink/70"
                             >
                               Cashier {o.cashier} ·{" "}
-                              {o.paymentMethod.toUpperCase()}
+                              {labelForMethodId(o.paymentMethod, payCatalog)}
                               {o.paymentReference
                                 ? ` · ref ${o.paymentReference}`
                                 : ""}
@@ -646,6 +713,34 @@ export function FinanceDashboardPanel() {
                               {formatMoney(o.vat)} · Margin {o.grossMarginPct}%
                               <br />
                               Detail: {o.itemsSummary}
+                              {o.paymentProofUrl ? (
+                                <div className="mt-3 space-y-1.5">
+                                  <p className="font-semibold text-ink/55">
+                                    Payment proof
+                                  </p>
+                                  <a
+                                    href={o.paymentProofUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="block max-w-xs overflow-hidden rounded-xl border border-ink/10 bg-white"
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={o.paymentProofUrl}
+                                      alt="Payment proof"
+                                      className="max-h-40 w-full object-contain"
+                                    />
+                                  </a>
+                                  <a
+                                    href={o.paymentProofUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-teal underline"
+                                  >
+                                    Open full size
+                                  </a>
+                                </div>
+                              ) : null}
                             </td>
                           </tr>
                         ) : null}
@@ -653,12 +748,16 @@ export function FinanceDashboardPanel() {
                     ))}
                   </tbody>
                 </table>
-                {(dash?.byOrder.length ?? 0) === 0 ? (
+                {filteredOrders.length === 0 ? (
                   <p className="py-8 text-center text-sm text-ink/45">
                     No orders in this period
+                    {payKind !== "all"
+                      ? ` for ${PAYMENT_KIND_LABELS[payKind].toLowerCase()}`
+                      : ""}
                   </p>
                 ) : null}
               </div>
+              </>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-left text-sm">

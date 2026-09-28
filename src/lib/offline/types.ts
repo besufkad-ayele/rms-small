@@ -1,6 +1,5 @@
 import type { CloudInventoryItem, CloudMenuItem } from "@/lib/cloud-catalog";
-import type { CloudSaleOrder } from "@/lib/cloud-sales";
-import type { PaymentMethod } from "@/lib/tenant";
+import type { CloudSaleOrder, SalePaymentMethodId } from "@/lib/cloud-sales";
 
 export type ConnectionStatus = "live" | "slow" | "down";
 
@@ -51,7 +50,7 @@ export interface SaleLineInput {
 export interface CompleteSalePayload {
   orgId: string;
   lines: SaleLineInput[];
-  paymentMethod: PaymentMethod;
+  paymentMethod: SalePaymentMethodId;
   paymentReference?: string;
   paymentProofUrl?: string | null;
   cashierName: string;

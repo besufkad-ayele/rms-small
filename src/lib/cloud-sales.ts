@@ -3,12 +3,14 @@ import { computeBill } from "@/lib/money";
 import { getOrgReceiptSettings } from "@/lib/org-tax";
 import type { CloudMenuItem } from "@/lib/cloud-catalog";
 import type {
-  PaymentMethod,
   SaleOrderStatus,
   SalePaymentStatus,
 } from "@/lib/tenant";
 import { dayKey, startOfMonth, startOfWeek, startOfYear } from "@/lib/utils";
 import type { ReportPeriod } from "@/lib/types";
+
+/** Sale tender id — built-in or custom (e.g. custom-awash). */
+export type SalePaymentMethodId = string;
 
 /** Columns that may be missing until 20260928_payment_status is applied. */
 
@@ -88,7 +90,7 @@ export interface CloudSaleOrder {
   service_charge: number;
   vat: number;
   total: number;
-  payment_method: PaymentMethod;
+  payment_method: SalePaymentMethodId;
   payment_reference: string | null;
   /** Screenshot URL for CBE / Telebirr / other (owner review). */
   payment_proof_url?: string | null;
@@ -197,7 +199,7 @@ async function applyRecipeDelta(
 export async function completeCloudSale(input: {
   orgId: string;
   lines: { menuItem: CloudMenuItem; quantity: number }[];
-  paymentMethod: PaymentMethod;
+  paymentMethod: SalePaymentMethodId;
   paymentReference?: string;
   paymentProofUrl?: string | null;
   cashierName: string;
@@ -273,7 +275,7 @@ export async function markOrderPaid(input: {
   orgId: string;
   orderId: string;
   paidBy: string;
-  paymentMethod: PaymentMethod;
+  paymentMethod: SalePaymentMethodId;
   paymentReference?: string;
   paymentProofUrl?: string | null;
 }) {

@@ -4,7 +4,6 @@ import type {
   DayCloseRecord,
   MenuItem,
   OrderLine,
-  PaymentMethod,
   ReportPeriod,
   SaleOrder,
 } from "./types";
@@ -23,7 +22,7 @@ export interface CartLine {
 
 export async function completeSale(input: {
   lines: CartLine[];
-  paymentMethod: PaymentMethod;
+  paymentMethod: string;
   paymentReference?: string;
   cashierName: string;
   note?: string;

@@ -17,6 +17,7 @@ export type OrderFinanceRow = {
   cashier: string;
   paymentMethod: string;
   paymentReference: string;
+  paymentProofUrl: string | null;
   itemCount: number;
   itemsSummary: string;
   subtotal: number;
@@ -282,6 +283,7 @@ export async function getFinanceDashboard(
       cashier: order.cashier_name,
       paymentMethod: order.payment_method,
       paymentReference: order.payment_reference || "",
+      paymentProofUrl: (order.payment_proof_url as string | null) || null,
       itemCount: lines.reduce((s, l) => s + Number(l.quantity), 0),
       itemsSummary: parts.join(", "),
       subtotal: Number(order.subtotal) || 0,

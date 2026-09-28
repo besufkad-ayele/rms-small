@@ -1,12 +1,12 @@
 "use client";
 
 import { Suspense } from "react";
-import { RequireAccess } from "@/components/auth/RequireAuth";
+import { RequireAuth } from "@/components/auth/RequireAuth";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 
 export default function SettingsPage() {
   return (
-    <RequireAccess feature="billing" ownerOnly allowWhenBlocked>
+    <RequireAuth>
       <Suspense
         fallback={
           <div className="h-40 animate-pulse rounded-3xl bg-ink/5" />
@@ -14,6 +14,6 @@ export default function SettingsPage() {
       >
         <SettingsPanel />
       </Suspense>
-    </RequireAccess>
+    </RequireAuth>
   );
 }

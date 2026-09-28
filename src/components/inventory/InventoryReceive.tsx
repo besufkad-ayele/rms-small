@@ -9,6 +9,7 @@ import {
   upsertSupplier,
   type CloudInventoryMovement,
   type CloudInventorySupplier,
+  type InventoryReceivePaymentStatus,
 } from "@/lib/cloud-inventory-ledger";
 import { upsertInventory, type CloudInventoryItem } from "@/lib/cloud-catalog";
 import {
@@ -43,6 +44,8 @@ export function InventoryReceive() {
   );
   const [expiresAt, setExpiresAt] = useState("");
   const [cost, setCost] = useState(0);
+  const [paymentStatus, setPaymentStatus] =
+    useState<InventoryReceivePaymentStatus>("paid");
   const [note, setNote] = useState("");
 
   const [supName, setSupName] = useState("");
@@ -132,12 +135,14 @@ export function InventoryReceive() {
         purchasedAt,
         expiresAt,
         costPerUnit: cost,
+        paymentStatus,
         note,
       });
 
       setMessage("Stock received and recorded.");
       setQty(0);
       setNote("");
+      setPaymentStatus("paid");
       setName("");
       setExpiresAt("");
       setItemId("");
@@ -216,8 +221,8 @@ export function InventoryReceive() {
         <div className="sm:col-span-2">
           <h3 className="font-display text-lg">Receive stock</h3>
           <p className="mt-1 text-sm text-ink/55">
-            Add quantity, measurement, supplier, cost, buy & expiry — buyer is
-            you ({tenant!.profile.full_name}).
+            Add quantity, measurement, supplier, cost, payment (paid/credit), buy
+            & expiry — buyer is you ({tenant!.profile.full_name}).
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
@@ -400,6 +405,36 @@ export function InventoryReceive() {
             onChange={(e) => setExpiresAt(e.target.value)}
           />
         </label>
+        <div className="sm:col-span-2">
+          <span className="mb-1 block text-sm text-ink/60">Payment *</span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setPaymentStatus("paid")}
+              className={
+                paymentStatus === "paid"
+                  ? "rounded-full bg-teal px-3 py-1.5 text-xs font-medium text-white"
+                  : "rounded-full bg-ink/5 px-3 py-1.5 text-xs font-medium text-ink/70"
+              }
+            >
+              Fully paid
+            </button>
+            <button
+              type="button"
+              onClick={() => setPaymentStatus("credit")}
+              className={
+                paymentStatus === "credit"
+                  ? "rounded-full bg-coral px-3 py-1.5 text-xs font-medium text-white"
+                  : "rounded-full bg-ink/5 px-3 py-1.5 text-xs font-medium text-ink/70"
+              }
+            >
+              Credit
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-ink/45">
+            Defaults to fully paid. Use credit when you still owe the supplier.
+          </p>
+        </div>
         <label className="block text-sm sm:col-span-2">
           <span className="mb-1 block text-ink/60">Note</span>
           <input
@@ -518,8 +553,19 @@ export function InventoryReceive() {
                   +{m.quantity} {m.inventory_items?.unit}{" "}
                   {m.inventory_items?.name}
                 </span>
-                <span className="text-xs text-ink/45">
-                  {new Date(m.created_at).toLocaleString()}
+                <span className="flex shrink-0 items-center gap-2">
+                  {m.payment_status === "credit" ? (
+                    <span className="rounded-full bg-coral/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-coral">
+                      Credit
+                    </span>
+                  ) : m.payment_status === "paid" || !m.payment_status ? (
+                    <span className="rounded-full bg-teal/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-teal">
+                      Paid
+                    </span>
+                  ) : null}
+                  <span className="text-xs text-ink/45">
+                    {new Date(m.created_at).toLocaleString()}
+                  </span>
                 </span>
               </div>
               <p className="mt-1 text-xs text-ink/55">

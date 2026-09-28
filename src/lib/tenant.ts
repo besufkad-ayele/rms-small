@@ -64,6 +64,23 @@ export type SubStatus =
 export type ProofStatus = "pending" | "approved" | "rejected";
 export type VerificationStatus = "pending" | "approved" | "rejected";
 export type PaymentMethod = "cash" | "cbe" | "telebirr" | "other";
+
+export const PAYMENT_METHOD_OPTIONS: {
+  id: PaymentMethod;
+  label: string;
+}[] = [
+  { id: "cash", label: "Cash" },
+  { id: "cbe", label: "CBE" },
+  { id: "telebirr", label: "Telebirr" },
+  { id: "other", label: "Other" },
+];
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  cash: "Cash",
+  cbe: "CBE",
+  telebirr: "Telebirr",
+  other: "Other",
+};
 export type UnitKind = "mass" | "volume" | "count" | "custom";
 export type MenuCategory =
   | "hot-drinks"
