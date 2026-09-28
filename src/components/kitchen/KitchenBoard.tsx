@@ -23,6 +23,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Check, ChefHat, Clock, GripVertical } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import {
+  listCloudOrders,
   listKitchenOrders,
   updateOrderStatus,
   type CloudSaleOrder,
@@ -31,7 +32,7 @@ import {
   SALE_ORDER_STATUS_LABELS,
   type SaleOrderStatus,
 } from "@/lib/tenant";
-import { cn, formatMoney } from "@/lib/utils";
+import { cn, dayKey, formatMoney } from "@/lib/utils";
 
 type KitchenColumnStatus = "placed" | "preparing" | "ready";
 type AdvanceStatus = KitchenColumnStatus | "completed";
@@ -57,9 +58,15 @@ export function KitchenBoard() {
   const { tenant } = useAuth();
   const orgId = tenant!.organization.id;
   const [orders, setOrders] = useState<CloudSaleOrder[]>([]);
+  const [servedToday, setServedToday] = useState<CloudSaleOrder[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [lastServed, setLastServed] = useState<{
+    receipt: string;
+    total: number;
+    items: number;
+  } | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -70,7 +77,16 @@ export function KitchenBoard() {
 
   const reload = useCallback(async () => {
     try {
-      setOrders(await listKitchenOrders(orgId));
+      const [open, done] = await Promise.all([
+        listKitchenOrders(orgId),
+        listCloudOrders(orgId, {
+          dayKey: dayKey(),
+          statuses: ["completed"],
+          limit: 200,
+        }),
+      ]);
+      setOrders(open);
+      setServedToday(done);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load kitchen queue");
@@ -82,6 +98,28 @@ export function KitchenBoard() {
     const t = window.setInterval(() => void reload(), 12_000);
     return () => window.clearInterval(t);
   }, [reload]);
+
+  useEffect(() => {
+    if (!lastServed) return;
+    const t = window.setTimeout(() => setLastServed(null), 4500);
+    return () => window.clearTimeout(t);
+  }, [lastServed]);
+
+  const servedStats = useMemo(() => {
+    let items = 0;
+    let total = 0;
+    for (const o of servedToday) {
+      total += Number(o.total) || 0;
+      for (const l of o.sale_order_lines || o.lines || []) {
+        items += Number(l.quantity) || 0;
+      }
+    }
+    return {
+      count: servedToday.length,
+      items,
+      total: Math.round(total * 100) / 100,
+    };
+  }, [servedToday]);
 
   const activeOrder = useMemo(
     () => orders.find((o) => o.id === activeId) ?? null,
@@ -105,6 +143,19 @@ export function KitchenBoard() {
     );
     try {
       await updateOrderStatus(orgId, orderId, status);
+      if (status === "completed") {
+        const lines = order.sale_order_lines || order.lines || [];
+        const items = lines.reduce((s, l) => s + Number(l.quantity), 0);
+        setLastServed({
+          receipt: order.receipt_number,
+          total: Number(order.total) || 0,
+          items,
+        });
+        setServedToday((prev) => [
+          { ...order, status: "completed" as SaleOrderStatus },
+          ...prev.filter((o) => o.id !== orderId),
+        ]);
+      }
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Update failed");
@@ -139,10 +190,10 @@ export function KitchenBoard() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-ink/60">
           Drag tickets between columns, or use the button — advance when prep
-          starts and when food is ready.
+          starts and when food is ready. Mark served when it leaves the kitchen.
         </p>
         <button
           type="button"
@@ -152,6 +203,37 @@ export function KitchenBoard() {
           Refresh
         </button>
       </div>
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="rounded-2xl border border-ink/8 bg-white/90 px-3 py-2.5">
+          <p className="text-[11px] text-ink/50">In kitchen</p>
+          <p className="mt-0.5 font-display text-xl">{orders.length}</p>
+        </div>
+        <div className="rounded-2xl border border-teal/25 bg-teal/5 px-3 py-2.5">
+          <p className="text-[11px] text-teal/80">Served today</p>
+          <p className="mt-0.5 font-display text-xl text-teal">
+            {servedStats.count}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-ink/8 bg-white/90 px-3 py-2.5">
+          <p className="text-[11px] text-ink/50">Items out</p>
+          <p className="mt-0.5 font-display text-xl">{servedStats.items}</p>
+        </div>
+        <div className="rounded-2xl border border-ink/8 bg-white/90 px-3 py-2.5">
+          <p className="text-[11px] text-ink/50">Value served</p>
+          <p className="mt-0.5 font-display text-xl">
+            {formatMoney(servedStats.total)}
+          </p>
+        </div>
+      </div>
+
+      {lastServed ? (
+        <p className="rounded-2xl border border-teal/30 bg-teal/10 px-3 py-2 text-sm text-ink">
+          Served {lastServed.receipt}: {lastServed.items} item(s) ·{" "}
+          {formatMoney(lastServed.total)} left the kitchen
+        </p>
+      ) : null}
+
       {error ? (
         <p className="rounded-xl bg-coral/15 px-3 py-2 text-sm text-coral">
           {error}

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { LayoutDashboard, PackageMinus, PackagePlus } from "lucide-react";
-import { RequireAuth } from "@/components/auth/RequireAuth";
+import { RequireAccess } from "@/components/auth/RequireAuth";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { InventoryIssue } from "@/components/inventory/InventoryIssue";
 import { InventoryManager } from "@/components/inventory/InventoryManager";
@@ -16,9 +16,9 @@ type InvTab = "dashboard" | "receive" | "issue";
 
 export default function InventoryPage() {
   return (
-    <RequireAuth title="Inventory" module="inventory">
+    <RequireAccess module="inventory">
       <InventoryWorkspace />
-    </RequireAuth>
+    </RequireAccess>
   );
 }
 

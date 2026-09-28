@@ -29,7 +29,7 @@ export const STAFF_FEATURE_LABELS: Record<StaffFeature, string> = {
   inventory: "Inventory receive & catalog",
   inventory_issue: "Inventory issue (take-out)",
   finance: "Finance & reports",
-  billing: "Billing & subscription",
+  billing: "Billing (owner settings — not for staff)",
   staff: "Manage staff (HR)",
 };
 

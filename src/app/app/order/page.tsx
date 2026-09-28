@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Ban, ClipboardList, ShoppingBag } from "lucide-react";
-import { RequireAuth } from "@/components/auth/RequireAuth";
+import { RequireAccess } from "@/components/auth/RequireAuth";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { CashierOrderBoard } from "@/components/order/CashierOrderBoard";
 import { OwnerCancelBoard } from "@/components/order/OwnerCancelBoard";
@@ -17,9 +17,9 @@ type OrderTab = "pos" | "queue" | "cancel";
 
 export default function OrderPage() {
   return (
-    <RequireAuth title="Order" module="ordering" feature="order">
+    <RequireAccess module="ordering" feature="order">
       <OrderWorkspace />
-    </RequireAuth>
+    </RequireAccess>
   );
 }
 

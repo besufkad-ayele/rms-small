@@ -148,7 +148,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // That left stale hasMembership=false after onboard/login and sent users
     // back to /onboarding forever.
     const run = async () => {
-      setSessionResolved(false);
+      // Only gate the UI on the first resolve. Later refreshes (token, login
+      // follow-up, manual retry) must not flash AuthLoadingScreen app-wide.
+      if (!lastRefreshAt.current) {
+        setSessionResolved(false);
+      }
       try {
         const u = await getUser();
         if (!u) {
@@ -220,13 +224,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const {
         data: { subscription },
       } = supabase.auth.onAuthStateChange((event) => {
-        // Skip noisy token refreshes when we refreshed recently
-        if (
-          event === "TOKEN_REFRESHED" &&
-          Date.now() - lastRefreshAt.current < 15_000
-        ) {
-          return;
-        }
+        // Token refresh does not change user/tenant — never full-refresh for it.
+        if (event === "TOKEN_REFRESHED") return;
         if (event === "INITIAL_SESSION") {
           // Initial mount already calls refresh()
           return;

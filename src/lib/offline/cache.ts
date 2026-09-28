@@ -1,6 +1,7 @@
 import type { CloudInventoryItem, CloudMenuItem } from "@/lib/cloud-catalog";
 import type { PaidBill } from "@/lib/cloud-bills";
 import { db } from "@/lib/db";
+import type { OrgReceiptSettings } from "@/lib/org-tax";
 import type { CatalogBundle } from "./types";
 
 function menuKey(orgId: string) {
@@ -15,11 +16,23 @@ function billsKey(orgId: string) {
 function syncMetaKey(orgId: string) {
   return `syncMeta:${orgId}`;
 }
+function receiptSettingsKey(orgId: string) {
+  return `receiptSettings:${orgId}`;
+}
 
 export type CatalogSyncMeta = {
   menuPulledAt: string | null;
   inventoryPulledAt: string | null;
   lastFullPullAt: string | null;
+  /** ISO timestamp of last receipt-settings pull (maps to org_meta.updated_at). */
+  receiptSettingsPulledAt: string | null;
+};
+
+/** Durable browser cache for finance receipt / VAT / service details. */
+export type CachedReceiptSettings = {
+  settings: OrgReceiptSettings;
+  /** Remote org_meta.updated_at when this snapshot was taken. */
+  remoteUpdatedAt: string | null;
 };
 
 async function putCache(key: string, orgId: string, data: unknown) {
@@ -39,13 +52,13 @@ async function getCache<T>(key: string): Promise<T | null> {
 export async function getCatalogSyncMeta(
   orgId: string,
 ): Promise<CatalogSyncMeta> {
-  return (
-    (await getCache<CatalogSyncMeta>(syncMetaKey(orgId))) || {
-      menuPulledAt: null,
-      inventoryPulledAt: null,
-      lastFullPullAt: null,
-    }
-  );
+  const cached = await getCache<Partial<CatalogSyncMeta>>(syncMetaKey(orgId));
+  return {
+    menuPulledAt: cached?.menuPulledAt ?? null,
+    inventoryPulledAt: cached?.inventoryPulledAt ?? null,
+    lastFullPullAt: cached?.lastFullPullAt ?? null,
+    receiptSettingsPulledAt: cached?.receiptSettingsPulledAt ?? null,
+  };
 }
 
 export async function setCatalogSyncMeta(
@@ -94,6 +107,19 @@ export async function getCachedPaidBills(
   orgId: string,
 ): Promise<PaidBill[] | null> {
   return getCache<PaidBill[]>(billsKey(orgId));
+}
+
+export async function cacheReceiptSettings(
+  orgId: string,
+  payload: CachedReceiptSettings,
+) {
+  await putCache(receiptSettingsKey(orgId), orgId, payload);
+}
+
+export async function getCachedReceiptSettings(
+  orgId: string,
+): Promise<CachedReceiptSettings | null> {
+  return getCache<CachedReceiptSettings>(receiptSettingsKey(orgId));
 }
 
 /** Merge changed rows into the local menu cache (A+B incremental). */

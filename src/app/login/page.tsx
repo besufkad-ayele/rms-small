@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { LoginScreen } from "@/components/auth/LoginScreen";
 import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { isOwner } from "@/lib/permissions";
 
 function LoginGate() {
   const {
@@ -40,7 +41,11 @@ function LoginGate() {
       return;
     }
     if (accessBlocked) {
-      router.replace("/app/billing");
+      router.replace(
+        isOwner(tenant.membership)
+          ? "/app/settings?tab=billing"
+          : "/app",
+      );
       return;
     }
     router.replace("/app");

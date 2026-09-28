@@ -1,5 +1,6 @@
 import { computeBill } from "@/lib/money";
 import type { CloudSaleOrder } from "@/lib/cloud-sales";
+import { getOrgReceiptSettings } from "@/lib/org-tax";
 import { dayKey, uid } from "@/lib/utils";
 import { db, getMeta } from "@/lib/db";
 import { applyLocalStockDeduction } from "./cache";
@@ -19,6 +20,7 @@ async function nextLocalReceipt(orgId: string): Promise<string> {
 /**
  * Persist a sale on-device so financial data is never lost when the
  * network is down. Returns a CloudSaleOrder-shaped record for receipts.
+ * Rates come from finance receipt settings cache (same source as online).
  */
 export async function recordSaleLocally(
   input: CompleteSalePayload,
@@ -33,11 +35,15 @@ export async function recordSaleLocally(
     line_total: Math.round(menuItem.price * quantity * 100) / 100,
   }));
   const subtotal = orderLines.reduce((s, l) => s + l.line_total, 0);
-  const bill = computeBill(subtotal);
-  // Offline uses default rates; cloud path applies org tax settings.
+  const tax = await getOrgReceiptSettings(input.orgId);
+  const bill = computeBill(subtotal, {
+    vatPercent: tax.vat_percent,
+    servicePercent: tax.service_percent,
+  });
   const now = new Date();
   const receipt =
     input.localOrder?.receipt_number || (await nextLocalReceipt(input.orgId));
+  const paid = Boolean(input.markPaid);
 
   const order: CloudSaleOrder = {
     id: input.localOrder?.id || uid("sale"),
@@ -49,12 +55,16 @@ export async function recordSaleLocally(
     total: bill.total,
     payment_method: input.paymentMethod,
     payment_reference: input.paymentReference?.trim() || null,
+    payment_proof_url: input.paymentProofUrl?.trim() || null,
     cashier_name: input.cashierName,
     note: null,
     day_key: dayKey(now),
     status: "placed",
-    place_label: null,
-    kitchen_note: null,
+    payment_status: paid ? "paid" : "unpaid",
+    paid_at: paid ? now.toISOString() : null,
+    paid_by: paid ? input.cashierName : null,
+    place_label: input.placeLabel?.trim() || null,
+    kitchen_note: input.kitchenNote?.trim() || null,
     canceled_at: null,
     canceled_by: null,
     vat_percent: bill.vatPercent,

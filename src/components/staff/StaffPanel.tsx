@@ -33,7 +33,6 @@ const PERM_KEYS: PermKey[] = [
   "can_inventory",
   "can_inventory_issue",
   "can_finance",
-  "can_billing",
   "can_manage_staff",
 ];
 
@@ -351,7 +350,7 @@ export function StaffPanel() {
             </select>
             {role === "waiter" ? (
               <p className="mt-1.5 text-xs text-ink/50">
-                Waiters place orders and mark them complete — no printing or
+                Waiters place orders and mark them complete — no pay, print, or
                 cancel requests.
               </p>
             ) : null}
@@ -514,7 +513,7 @@ function StaffCard({
             </select>
             {localRole === "waiter" ? (
               <p className="mt-1 text-xs text-ink/50">
-                Place &amp; complete orders only — no print or cancel.
+                Place &amp; complete orders only — no pay, print, or cancel.
               </p>
             ) : null}
           </label>

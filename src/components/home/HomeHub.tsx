@@ -7,13 +7,14 @@ import {
   BarChart3,
   ChefHat,
   ClipboardList,
-  CreditCard,
   Package,
+  Settings,
   ShoppingCart,
   Users,
   Wallet,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { AramisLogo } from "@/components/brand/AramisLogo";
 import { getSpendDashboard, type SpendDashboard } from "@/lib/cloud-bills";
 import {
   summarizeInventory,
@@ -21,10 +22,12 @@ import {
 } from "@/lib/cloud-catalog";
 import { getCloudSalesSummary } from "@/lib/cloud-sales";
 import { loadInventoryResilient } from "@/lib/offline/resilient";
+import { isOwner } from "@/lib/permissions";
 import { cn, formatMoney } from "@/lib/utils";
 
 export function HomeHub() {
   const { tenant, hasFeature, daysLeft, warningLevel } = useAuth();
+  const owner = tenant ? isOwner(tenant.membership) : false;
   const [todayRevenue, setTodayRevenue] = useState(0);
   const [todayOrders, setTodayOrders] = useState(0);
   const [inventory, setInventory] = useState<InventoryDashboard | null>(null);
@@ -108,13 +111,13 @@ export function HomeHub() {
           },
         ]
       : []),
-    ...(hasFeature("billing")
+    ...(owner
       ? [
           {
-            href: "/app/billing",
-            title: "Billing",
-            blurb: "Trial, modules & payments",
-            icon: CreditCard,
+            href: "/app/settings",
+            title: "Settings & Billing",
+            blurb: "Theme, profile & subscription",
+            icon: Settings,
           },
         ]
       : []),
@@ -132,16 +135,14 @@ export function HomeHub() {
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4 sm:space-y-5">
-      <section className="w-full overflow-hidden rounded-3xl border border-ink/8 bg-gradient-to-br from-ink via-ink to-teal/90 p-5 text-stone shadow-xl sm:p-7">
+      <section className="w-full overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[#0b1d1a] via-[#0f2a26] to-teal/90 p-5 text-[#eef2f0] shadow-xl sm:p-7">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gold/80">
-              Aramis Product
-            </p>
-            <h2 className="mt-2 font-display text-3xl text-gold sm:text-4xl">
+            <AramisLogo variant="mark" className="h-8 w-8" />
+            <h2 className="mt-3 font-display text-3xl text-gold sm:text-4xl">
               {tenant.profile.full_name}
             </h2>
-            <p className="mt-2 text-sm text-stone/75">
+            <p className="mt-2 text-sm text-white/75">
               {tenant.organization.name} · {tenant.organization.org_type}
               {daysLeft <= 10 && daysLeft < 900
                 ? ` · ${Math.max(0, daysLeft)} day(s) left`
@@ -155,20 +156,20 @@ export function HomeHub() {
                 )}
               >
                 {tenant.subscription.status === "trialing" ? "Trial" : "Plan"}{" "}
-                ends soon — renew in Billing.
+                ends soon — renew in Settings & Billing.
               </p>
             ) : null}
           </div>
           <div className="grid w-full grid-cols-2 gap-3 lg:max-w-sm lg:shrink-0">
             <div className="rounded-2xl bg-white/10 px-3 py-3 backdrop-blur">
-              <p className="text-xs text-stone/60">Today&apos;s sales</p>
-              <p className="mt-1 font-display text-xl sm:text-2xl">
+              <p className="text-xs text-white/60">Today&apos;s sales</p>
+              <p className="mt-1 font-display text-xl text-white sm:text-2xl">
                 {formatMoney(todayRevenue)}
               </p>
             </div>
             <div className="rounded-2xl bg-white/10 px-3 py-3 backdrop-blur">
-              <p className="text-xs text-stone/60">Orders today</p>
-              <p className="mt-1 font-display text-xl sm:text-2xl">
+              <p className="text-xs text-white/60">Orders today</p>
+              <p className="mt-1 font-display text-xl text-white sm:text-2xl">
                 {todayOrders}
               </p>
             </div>
@@ -189,29 +190,27 @@ export function HomeHub() {
           {hasFeature("inventory") && inventory ? (
             <Link
               href="/app/inventory"
-              className="rounded-3xl border border-ink/8 bg-white/90 p-5 shadow-sm transition hover:border-teal/30 hover:shadow-md"
+              className="rounded-3xl border border-ink/10 bg-white p-5 text-ink shadow-sm transition hover:border-teal/30 hover:shadow-md dark:border-white/10 dark:bg-[#16352f] dark:text-[#e8efec]"
             >
               <div className="flex items-center gap-2">
                 <span className="rounded-2xl bg-teal/10 p-2 text-teal">
                   <Package className="h-4 w-4" />
                 </span>
-                <h3 className="font-display text-lg text-ink">
-                  Inventory dashboard
-                </h3>
+                <h3 className="font-display text-lg">Inventory dashboard</h3>
               </div>
               <div className="mt-4 grid grid-cols-3 gap-2">
                 <div>
-                  <p className="text-[11px] text-ink/50">Items</p>
+                  <p className="text-[11px] opacity-55">Items</p>
                   <p className="font-display text-xl">{inventory.itemCount}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] text-ink/50">Stock value</p>
+                  <p className="text-[11px] opacity-55">Stock value</p>
                   <p className="font-display text-xl">
                     {formatMoney(inventory.stockValue)}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[11px] text-ink/50">Low stock</p>
+                  <p className="text-[11px] opacity-55">Low stock</p>
                   <p
                     className={cn(
                       "flex items-center gap-1 font-display text-xl",
@@ -231,31 +230,29 @@ export function HomeHub() {
           {hasFeature("finance") && spend ? (
             <Link
               href="/app/reports"
-              className="rounded-3xl border border-ink/8 bg-white/90 p-5 shadow-sm transition hover:border-coral/30 hover:shadow-md"
+              className="rounded-3xl border border-ink/10 bg-white p-5 text-ink shadow-sm transition hover:border-coral/30 hover:shadow-md dark:border-white/10 dark:bg-[#16352f] dark:text-[#e8efec]"
             >
               <div className="flex items-center gap-2">
                 <span className="rounded-2xl bg-coral/10 p-2 text-coral">
                   <Wallet className="h-4 w-4" />
                 </span>
-                <h3 className="font-display text-lg text-ink">
-                  Spend dashboard
-                </h3>
+                <h3 className="font-display text-lg">Spend dashboard</h3>
               </div>
               <div className="mt-4 grid grid-cols-3 gap-2">
                 <div>
-                  <p className="text-[11px] text-ink/50">Today</p>
+                  <p className="text-[11px] opacity-55">Today</p>
                   <p className="font-display text-xl">
                     {formatMoney(spend.todaySpent)}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[11px] text-ink/50">This month</p>
+                  <p className="text-[11px] opacity-55">This month</p>
                   <p className="font-display text-xl">
                     {formatMoney(spend.monthSpent)}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[11px] text-ink/50">Bills</p>
+                  <p className="text-[11px] opacity-55">Bills</p>
                   <p className="font-display text-xl">{spend.billCount}</p>
                 </div>
               </div>
@@ -275,7 +272,7 @@ export function HomeHub() {
           <div className="min-w-0">
             <h3 className="font-display text-2xl">Order food</h3>
             <p className="mt-1 text-sm text-white/80">
-              Cashier POS — charge & print one receipt
+              Cashier POS — place, mark paid, print
             </p>
           </div>
         </Link>
@@ -297,13 +294,13 @@ export function HomeHub() {
             <Link
               key={card.href}
               href={card.href}
-              className="flex h-full min-h-[7.5rem] flex-col rounded-3xl border border-ink/8 bg-white/90 p-5 shadow-sm transition hover:border-teal/30 hover:shadow-md"
+              className="flex h-full min-h-[7.5rem] flex-col rounded-3xl border border-ink/10 bg-white p-5 text-ink shadow-sm transition hover:border-teal/30 hover:shadow-md dark:border-white/10 dark:bg-[#16352f] dark:text-[#e8efec]"
             >
-              <span className="mb-3 w-fit rounded-2xl bg-teal/10 p-2.5 text-teal">
+              <span className="mb-3 w-fit rounded-2xl bg-teal/15 p-2.5 text-teal">
                 <Icon className="h-5 w-5" />
               </span>
-              <h3 className="font-display text-lg text-ink">{card.title}</h3>
-              <p className="mt-1 text-sm text-ink/55">{card.blurb}</p>
+              <h3 className="font-display text-lg">{card.title}</h3>
+              <p className="mt-1 text-sm opacity-60">{card.blurb}</p>
             </Link>
           );
         })}

@@ -36,13 +36,6 @@ export function InstallAppButton({ className }: { className?: string }) {
       window.removeEventListener("beforeinstallprompt", onBeforeInstall);
   }, []);
 
-  useEffect(() => {
-    if (!("serviceWorker" in navigator)) return;
-    void navigator.serviceWorker
-      .register("/sw.js", { scope: "/", updateViaCache: "none" })
-      .catch((err) => console.warn("SW register failed", err));
-  }, []);
-
   if (isStandalone) return null;
 
   async function install() {
@@ -70,7 +63,7 @@ export function InstallAppButton({ className }: { className?: string }) {
         Install app
       </button>
       {showIosHelp ? (
-        <p className="mt-2 text-[11px] leading-snug text-stone/70">
+        <p className="mt-2 text-[11px] leading-snug text-white/70">
           On iPhone/iPad: tap Share, then &quot;Add to Home Screen&quot;.
         </p>
       ) : null}

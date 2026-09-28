@@ -38,7 +38,7 @@ function StaffLoginGate() {
       return;
     }
     if (accessBlocked) {
-      router.replace("/app/billing");
+      router.replace("/app");
       return;
     }
     router.replace("/app");

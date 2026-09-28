@@ -17,6 +17,7 @@ import {
 } from "@/app/platform/actions";
 import type { ModulePriceRow, PackageRow } from "@/lib/pricing";
 import { cn, formatDateTime } from "@/lib/utils";
+import { AramisLogo } from "@/components/brand/AramisLogo";
 import { OnboardingSection } from "./OnboardingSection";
 import { OverviewSection } from "./OverviewSection";
 import { PackagesSection } from "./PackagesSection";
@@ -383,10 +384,8 @@ export function PlatformDashboard({ onSignOut }: { onSignOut: () => void }) {
     <div className="flex min-h-dvh bg-stone">
       <aside className="sticky top-0 hidden h-dvh w-56 shrink-0 flex-col border-r border-ink/8 bg-white/80 px-3 py-4 backdrop-blur lg:flex">
         <div className="px-2 pb-4">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-teal">
-            Aramis Product
-          </p>
-          <p className="font-display text-lg text-ink">Owner</p>
+          <AramisLogo variant="mark" className="h-9 w-9" />
+          <p className="mt-2 font-display text-lg text-ink">Owner</p>
         </div>
         <nav className="flex flex-1 flex-col gap-1">
           {NAV.map((item) => {
@@ -439,9 +438,12 @@ export function PlatformDashboard({ onSignOut }: { onSignOut: () => void }) {
         <header className="sticky top-0 z-20 border-b border-ink/8 bg-stone/90 px-3 py-3 backdrop-blur sm:px-5">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0 lg:hidden">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-teal">
-                Aramis Product · Owner
-              </p>
+              <div className="flex items-center gap-2">
+                <AramisLogo variant="mark" className="h-7 w-7" />
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-teal">
+                  Owner
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => setMobileNav((v) => !v)}

@@ -5,6 +5,7 @@ import { FormEvent, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { AramisLogo } from "@/components/brand/AramisLogo";
 
 export function LoginScreen({
   variant = "default",
@@ -62,10 +63,10 @@ export function LoginScreen({
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_#2A9D8F40,_transparent_55%),radial-gradient(ellipse_at_bottom_right,_#E9C46A28,_transparent_45%)]" />
       <div className="relative mx-auto flex min-h-dvh w-full max-w-lg flex-col justify-center px-4 py-8 sm:px-6 sm:py-12">
         <div className="mb-8 text-center">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-teal">
-            Aramis Product
-          </p>
-          <h1 className="mt-3 font-display text-4xl tracking-tight text-white sm:text-5xl">
+          <div className="flex justify-center">
+            <AramisLogo priority className="h-12 sm:h-14" />
+          </div>
+          <h1 className="mt-5 font-display text-4xl tracking-tight text-white sm:text-5xl">
             {isStaff ? "Staff sign in" : "Sign in"}
           </h1>
           <p className="mx-auto mt-3 max-w-sm text-sm text-stone/70">{subtitle}</p>

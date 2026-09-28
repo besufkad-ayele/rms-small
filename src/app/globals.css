@@ -7,6 +7,20 @@
   --gold: #e9c46a;
   --coral: #e76f51;
   --paper: #ffffff;
+  --shell: #0b1d1a;
+  --shell-fg: #eef2f0;
+}
+
+html.dark {
+  --ink: #e8efec;
+  --stone: #071412;
+  --teal: #3db8a8;
+  --gold: #f0d078;
+  --coral: #ef8a6f;
+  /* Elevated card surface — stays darker than page bg */
+  --paper: #122a26;
+  --shell: #050e0c;
+  --shell-fg: #e8efec;
 }
 
 @theme inline {
@@ -16,6 +30,8 @@
   --color-gold: var(--gold);
   --color-coral: var(--coral);
   --color-paper: var(--paper);
+  --color-shell: var(--shell);
+  --color-shell-fg: var(--shell-fg);
   --color-background: var(--stone);
   --color-foreground: var(--ink);
   --font-sans: var(--font-dm-sans);
@@ -36,13 +52,32 @@ body {
   width: 100%;
   border-radius: 0.75rem;
   border: 1px solid color-mix(in oklab, var(--ink) 12%, transparent);
-  background: white;
+  background: var(--paper);
+  color: var(--ink);
   padding: 0.625rem 0.75rem;
   outline: none;
 }
 
 .field:focus {
   box-shadow: 0 0 0 2px color-mix(in oklab, var(--teal) 45%, transparent);
+}
+
+/*
+  Map common hardcoded white card surfaces to theme paper in dark mode
+  so text-ink stays readable without rewriting every screen at once.
+*/
+html.dark :where(.bg-white, .bg-white\/90, .bg-white\/80, .bg-white\/95) {
+  background-color: var(--paper) !important;
+  color: var(--ink);
+}
+
+html.dark :where(.bg-paper, .bg-paper\/90, .bg-paper\/80) {
+  background-color: var(--paper) !important;
+  color: var(--ink);
+}
+
+html.dark :where(.bg-stone\/40, .bg-stone\/50, .bg-stone\/60) {
+  background-color: color-mix(in oklab, var(--paper) 85%, white 4%) !important;
 }
 
 @media print {

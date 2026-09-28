@@ -8,7 +8,7 @@ import {
   upsertInventory,
   upsertMenu,
 } from "@/lib/cloud-catalog";
-import { saveCloudDayClose } from "@/lib/cloud-sales";
+import { saveCloudDayClose, saveCloudXReport, insertSaleOrderRow } from "@/lib/cloud-sales";
 import { createClient } from "@/lib/supabase/client";
 import type { CloudSaleOrder } from "@/lib/cloud-sales";
 import {
@@ -82,9 +82,8 @@ async function pushLocalSale(payload: CompleteSalePayload) {
   let orderId = existing?.id ?? null;
 
   if (!orderId) {
-    const { data: inserted, error } = await supabase
-      .from("sale_orders")
-      .insert({
+    try {
+      const inserted = await insertSaleOrderRow({
         organization_id: payload.orgId,
         receipt_number: order.receipt_number,
         subtotal: Number(order.subtotal),
@@ -93,24 +92,33 @@ async function pushLocalSale(payload: CompleteSalePayload) {
         total: Number(order.total),
         payment_method: order.payment_method,
         payment_reference: order.payment_reference,
+        payment_proof_url:
+          order.payment_proof_url ?? payload.paymentProofUrl ?? null,
         cashier_name: order.cashier_name || "Cashier",
         day_key: order.day_key,
+        status: order.status || "placed",
+        payment_status:
+          order.payment_status ||
+          (payload.markPaid ? "paid" : "unpaid"),
+        paid_at: order.paid_at ?? null,
+        paid_by: order.paid_by ?? null,
+        place_label: order.place_label ?? payload.placeLabel?.trim() ?? null,
+        kitchen_note: order.kitchen_note ?? payload.kitchenNote?.trim() ?? null,
         created_at: order.created_at,
-      })
-      .select("id")
-      .single();
-
-    if (error) {
+        vat_percent: order.vat_percent ?? null,
+        service_percent: order.service_percent ?? null,
+      });
+      orderId = String(inserted.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       // Race: another attempt inserted the same receipt
-      if (error.code === "23505" || /duplicate|unique/i.test(error.message)) {
+      if (/duplicate|unique/i.test(message) || message.includes("23505")) {
         existing = await findExisting();
         orderId = existing?.id ?? null;
-        if (!orderId) throw new Error(error.message);
+        if (!orderId) throw new Error(message);
       } else {
-        throw new Error(error.message || "Sale sync failed");
+        throw new Error(message || "Sale sync failed");
       }
-    } else {
-      orderId = inserted.id;
     }
   }
 
@@ -228,6 +236,11 @@ async function runItem(item: SyncQueueItem): Promise<void> {
     case "SAVE_DAY_CLOSE": {
       const p = item.payload as Parameters<typeof saveCloudDayClose>[0];
       await saveCloudDayClose(p);
+      break;
+    }
+    case "SAVE_X_REPORT": {
+      const p = item.payload as Parameters<typeof saveCloudXReport>[0];
+      await saveCloudXReport(p);
       break;
     }
     case "CREATE_PAID_BILL": {

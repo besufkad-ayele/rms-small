@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
+import { AramisLogo } from "@/components/brand/AramisLogo";
 
 export function OnboardingScreen() {
   const {
@@ -115,13 +116,18 @@ export function OnboardingScreen() {
   return (
     <div className="min-h-dvh bg-stone px-4 py-8 sm:px-6">
       <div className="mx-auto w-full max-w-xl">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal">
-          Aramis Product · Step 2
-        </p>
-        <h1 className="mt-2 font-display text-3xl text-ink sm:text-4xl">
-          Business onboarding
-        </h1>
-        <p className="mt-2 text-sm text-ink/60">
+        <div className="flex items-center gap-3">
+          <AramisLogo variant="mark" className="h-10 w-10" />
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal">
+              Step 2
+            </p>
+            <h1 className="font-display text-3xl text-ink sm:text-4xl">
+              Business onboarding
+            </h1>
+          </div>
+        </div>
+        <p className="mt-3 text-sm text-ink/60">
           Tell us about your café or restaurant and pick modules. After Aramis
           approves, sign in with the email and password you already created —
           your 14-day trial starts then.

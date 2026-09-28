@@ -1,10 +1,84 @@
 import { createClient } from "@/lib/supabase/client";
 import { computeBill } from "@/lib/money";
-import { getOrgTaxSettings } from "@/lib/org-tax";
+import { getOrgReceiptSettings } from "@/lib/org-tax";
 import type { CloudMenuItem } from "@/lib/cloud-catalog";
-import type { PaymentMethod, SaleOrderStatus } from "@/lib/tenant";
+import type {
+  PaymentMethod,
+  SaleOrderStatus,
+  SalePaymentStatus,
+} from "@/lib/tenant";
 import { dayKey, startOfMonth, startOfWeek, startOfYear } from "@/lib/utils";
 import type { ReportPeriod } from "@/lib/types";
+
+/** Columns that may be missing until 20260928_payment_status is applied. */
+
+function missingColumnFromError(message: string): string | null {
+  const m =
+    /Could not find the '([^']+)' column of 'sale_orders'/i.exec(message) ||
+    /column ["']?sale_orders\.([^"'\s]+)["']? does not exist/i.exec(message) ||
+    /Could not find the '([^']+)' column/i.exec(message);
+  return m?.[1] ?? null;
+}
+
+/**
+ * Insert a sale_orders row, stripping unknown columns when the DB migration
+ * has not been applied yet (so offline sync still lands as open orders).
+ */
+export async function insertSaleOrderRow(
+  row: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const supabase = createClient();
+  let payload: Record<string, unknown> = { ...row };
+  // Prefer full payload; fall back by dropping schema-cache misses.
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { data, error } = await supabase
+      .from("sale_orders")
+      .insert(payload)
+      .select("*")
+      .single();
+    if (!error && data) return data as Record<string, unknown>;
+    const missing = error?.message
+      ? missingColumnFromError(error.message)
+      : null;
+    if (!missing || !(missing in payload)) {
+      throw new Error(error?.message || "Sale failed");
+    }
+    const next = { ...payload };
+    delete next[missing];
+    payload = next;
+  }
+  throw new Error("Sale failed after schema fallbacks");
+}
+
+export async function updateSaleOrderRow(
+  orgId: string,
+  orderId: string,
+  patch: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const supabase = createClient();
+  let payload: Record<string, unknown> = { ...patch };
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { data, error } = await supabase
+      .from("sale_orders")
+      .update(payload)
+      .eq("id", orderId)
+      .eq("organization_id", orgId)
+      .neq("status", "canceled")
+      .select("*, sale_order_lines(*)")
+      .single();
+    if (!error && data) return data as Record<string, unknown>;
+    const missing = error?.message
+      ? missingColumnFromError(error.message)
+      : null;
+    if (!missing || !(missing in payload)) {
+      throw new Error(error?.message || "Update failed");
+    }
+    const next = { ...payload };
+    delete next[missing];
+    payload = next;
+  }
+  throw new Error("Update failed after schema fallbacks");
+}
 
 export interface CloudSaleOrder {
   id: string;
@@ -16,10 +90,16 @@ export interface CloudSaleOrder {
   total: number;
   payment_method: PaymentMethod;
   payment_reference: string | null;
+  /** Screenshot URL for CBE / Telebirr / other (owner review). */
+  payment_proof_url?: string | null;
   cashier_name: string;
   note: string | null;
   day_key: string;
   status: SaleOrderStatus;
+  /** Money state — finance + receipts only when paid. */
+  payment_status: SalePaymentStatus;
+  paid_at?: string | null;
+  paid_by?: string | null;
   place_label: string | null;
   kitchen_note: string | null;
   canceled_at: string | null;
@@ -44,6 +124,29 @@ export interface CloudSaleOrder {
     line_total: number;
     menu_item_id: string | null;
   }[];
+}
+
+/** Treat missing payment_status (pre-migration rows) as paid. */
+export function isOrderPaid(order: {
+  payment_status?: SalePaymentStatus | null;
+  status?: string | null;
+}): boolean {
+  if (order.status === "canceled") return false;
+  return (order.payment_status ?? "paid") === "paid";
+}
+
+function mapOrder(row: Record<string, unknown>): CloudSaleOrder {
+  const lines =
+    (row.sale_order_lines as CloudSaleOrder["sale_order_lines"]) ||
+    (row.lines as CloudSaleOrder["lines"]) ||
+    [];
+  return {
+    ...(row as unknown as CloudSaleOrder),
+    status: ((row.status as SaleOrderStatus) || "placed") as SaleOrderStatus,
+    payment_status: ((row.payment_status as SalePaymentStatus) ||
+      "paid") as SalePaymentStatus,
+    lines,
+  };
 }
 
 async function nextReceipt(orgId: string) {
@@ -96,9 +199,12 @@ export async function completeCloudSale(input: {
   lines: { menuItem: CloudMenuItem; quantity: number }[];
   paymentMethod: PaymentMethod;
   paymentReference?: string;
+  paymentProofUrl?: string | null;
   cashierName: string;
   placeLabel?: string;
   kitchenNote?: string;
+  /** Defaults false — place order only; pay via Mark as paid. */
+  markPaid?: boolean;
 }) {
   if (input.lines.length === 0) throw new Error("Cart is empty.");
   const supabase = createClient();
@@ -110,39 +216,40 @@ export async function completeCloudSale(input: {
     line_total: Math.round(menuItem.price * quantity * 100) / 100,
   }));
   const subtotal = orderLines.reduce((s, l) => s + l.line_total, 0);
-  const tax = await getOrgTaxSettings(input.orgId);
+  const tax = await getOrgReceiptSettings(input.orgId);
   const bill = computeBill(subtotal, {
     vatPercent: tax.vat_percent,
     servicePercent: tax.service_percent,
   });
   const now = new Date();
   const receipt = await nextReceipt(input.orgId);
+  const paid = Boolean(input.markPaid);
 
-  const { data: order, error } = await supabase
-    .from("sale_orders")
-    .insert({
-      organization_id: input.orgId,
-      receipt_number: receipt,
-      subtotal: bill.subtotal,
-      service_charge: bill.serviceCharge,
-      vat: bill.vat,
-      total: bill.total,
-      payment_method: input.paymentMethod,
-      payment_reference: input.paymentReference?.trim() || null,
-      cashier_name: input.cashierName,
-      day_key: dayKey(now),
-      status: "placed",
-      place_label: input.placeLabel?.trim() || null,
-      kitchen_note: input.kitchenNote?.trim() || null,
-      vat_percent: bill.vatPercent,
-      service_percent: bill.servicePercent,
-    })
-    .select("*")
-    .single();
-  if (error || !order) throw new Error(error?.message || "Sale failed");
+  const order = await insertSaleOrderRow({
+    organization_id: input.orgId,
+    receipt_number: receipt,
+    subtotal: bill.subtotal,
+    service_charge: bill.serviceCharge,
+    vat: bill.vat,
+    total: bill.total,
+    payment_method: input.paymentMethod,
+    payment_reference: input.paymentReference?.trim() || null,
+    payment_proof_url: input.paymentProofUrl?.trim() || null,
+    cashier_name: input.cashierName,
+    day_key: dayKey(now),
+    status: "placed",
+    payment_status: paid ? "paid" : "unpaid",
+    paid_at: paid ? now.toISOString() : null,
+    paid_by: paid ? input.cashierName : null,
+    place_label: input.placeLabel?.trim() || null,
+    kitchen_note: input.kitchenNote?.trim() || null,
+    vat_percent: bill.vatPercent,
+    service_percent: bill.servicePercent,
+  });
+  if (!order) throw new Error("Sale failed");
 
   const { error: lineErr } = await supabase.from("sale_order_lines").insert(
-    orderLines.map((l) => ({ ...l, order_id: order.id })),
+    orderLines.map((l) => ({ ...l, order_id: order.id as string })),
   );
   if (lineErr) throw new Error(lineErr.message);
 
@@ -158,11 +265,29 @@ export async function completeCloudSale(input: {
 
   await applyRecipeDelta(input.lines, -1);
 
-  return {
-    ...order,
-    status: (order.status || "placed") as SaleOrderStatus,
-    lines: orderLines,
-  } as CloudSaleOrder;
+  return mapOrder({ ...order, lines: orderLines });
+}
+
+/** Accept payment on an open ticket — unlocks receipt print + finance. */
+export async function markOrderPaid(input: {
+  orgId: string;
+  orderId: string;
+  paidBy: string;
+  paymentMethod: PaymentMethod;
+  paymentReference?: string;
+  paymentProofUrl?: string | null;
+}) {
+  const supabase = createClient();
+  const now = new Date().toISOString();
+  const data = await updateSaleOrderRow(input.orgId, input.orderId, {
+    payment_status: "paid",
+    paid_at: now,
+    paid_by: input.paidBy,
+    payment_method: input.paymentMethod,
+    payment_reference: input.paymentReference?.trim() || null,
+    payment_proof_url: input.paymentProofUrl?.trim() || null,
+  });
+  return mapOrder(data);
 }
 
 const OPEN_STATUSES: SaleOrderStatus[] = [
@@ -190,11 +315,7 @@ export async function listCloudOrders(
   if (opts?.statuses?.length) q = q.in("status", opts.statuses);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
-  return (data || []).map((o) => ({
-    ...o,
-    status: (o.status || "completed") as SaleOrderStatus,
-    lines: o.sale_order_lines || [],
-  })) as CloudSaleOrder[];
+  return (data || []).map((o) => mapOrder(o as Record<string, unknown>));
 }
 
 export async function listOpenOrders(orgId: string, forDay?: string) {
@@ -228,11 +349,7 @@ export async function updateOrderStatus(
     .select("*, sale_order_lines(*)")
     .single();
   if (error) throw new Error(error.message);
-  return {
-    ...data,
-    status: data.status as SaleOrderStatus,
-    lines: data.sale_order_lines || [],
-  } as CloudSaleOrder;
+  return mapOrder(data as Record<string, unknown>);
 }
 
 /** Cashier requests cancel — owner confirms in Cancel orders. */
@@ -255,11 +372,7 @@ export async function requestCancelOrder(input: {
     .select("*, sale_order_lines(*)")
     .single();
   if (error) throw new Error(error.message);
-  return {
-    ...data,
-    status: data.status as SaleOrderStatus,
-    lines: data.sale_order_lines || [],
-  } as CloudSaleOrder;
+  return mapOrder(data as Record<string, unknown>);
 }
 
 /**
@@ -307,11 +420,7 @@ export async function cancelCloudSale(input: {
     .select("*, sale_order_lines(*)")
     .single();
   if (upErr) throw new Error(upErr.message);
-  return {
-    ...updated,
-    status: "canceled" as SaleOrderStatus,
-    lines: updated.sale_order_lines || [],
-  } as CloudSaleOrder;
+  return mapOrder({ ...updated, status: "canceled" });
 }
 
 function periodStart(period: ReportPeriod): Date | null {
@@ -345,8 +454,9 @@ export async function getCloudSalesSummary(
   const { data, error } = await q;
   if (error) throw new Error(error.message);
 
-  const all = (data || []) as CloudSaleOrder[];
-  const orders = all.filter((o) => (o.status || "completed") !== "canceled");
+  const all = (data || []).map((o) => mapOrder(o as Record<string, unknown>));
+  // Finance: paid tickets only (unpaid kitchen orders do not count as revenue)
+  const orders = all.filter((o) => isOrderPaid(o));
   const revenue = orders.reduce((s, o) => s + Number(o.total), 0);
   const itemsSold = orders.reduce(
     (s, o) =>
@@ -429,4 +539,59 @@ export async function listCloudDayCloses(orgId: string) {
     .order("closed_at", { ascending: false });
   if (error) throw new Error(error.message);
   return data || [];
+}
+
+export type CloudXReport = {
+  id: string;
+  organization_id: string;
+  day_key: string;
+  system_total: number;
+  cash_at_hand: number;
+  variance: number;
+  note: string;
+  counted_by: string;
+  counted_at: string;
+};
+
+/** Mid-shift cash count — does not close the day. */
+export async function saveCloudXReport(input: {
+  orgId: string;
+  dayKey: string;
+  systemTotal: number;
+  cashAtHand: number;
+  note?: string;
+  countedBy: string;
+}) {
+  const supabase = createClient();
+  const variance =
+    Math.round((input.cashAtHand - input.systemTotal) * 100) / 100;
+  const { data, error } = await supabase
+    .from("x_reports")
+    .insert({
+      organization_id: input.orgId,
+      day_key: input.dayKey,
+      system_total: input.systemTotal,
+      cash_at_hand: input.cashAtHand,
+      variance,
+      note: (input.note || "").trim(),
+      counted_by: input.countedBy,
+    })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return data as CloudXReport;
+}
+
+export async function listCloudXReports(orgId: string, forDay?: string) {
+  const supabase = createClient();
+  let q = supabase
+    .from("x_reports")
+    .select("*")
+    .eq("organization_id", orgId)
+    .order("counted_at", { ascending: false })
+    .limit(40);
+  if (forDay) q = q.eq("day_key", forDay);
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  return (data || []) as CloudXReport[];
 }

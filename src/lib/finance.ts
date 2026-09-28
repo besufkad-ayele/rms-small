@@ -1,3 +1,4 @@
+import { isOrderPaid } from "@/lib/cloud-sales";
 import { createClient } from "@/lib/supabase/client";
 import type { ReportPeriod } from "@/lib/types";
 import {
@@ -172,23 +173,40 @@ export async function getFinanceDashboard(
 
   let priorQ = supabase
     .from("sale_orders")
-    .select("total")
+    .select("total, payment_status, status")
     .eq("organization_id", orgId);
   priorQ = applyRange(priorQ, prior);
 
   const [{ data, error }, { data: priorRows }, unitCostByMenu] =
     await Promise.all([
       q,
-      prior.from ? priorQ : Promise.resolve({ data: [] as { total: number }[] }),
+      prior.from
+        ? priorQ
+        : Promise.resolve({
+            data: [] as {
+              total: number;
+              payment_status?: string;
+              status?: string;
+            }[],
+          }),
       recipeUnitCostMap(orgId),
     ]);
   if (error) throw new Error(error.message);
 
-  const orders = data || [];
-  const priorRevenue = (priorRows || []).reduce(
-    (s, o) => s + (Number(o.total) || 0),
-    0,
+  const orders = (data || []).filter((o) =>
+    isOrderPaid({
+      payment_status: o.payment_status as "unpaid" | "paid" | null,
+      status: o.status as string | null,
+    }),
   );
+  const priorRevenue = (priorRows || [])
+    .filter((o) =>
+      isOrderPaid({
+        payment_status: o.payment_status as "unpaid" | "paid" | null,
+        status: o.status as string | null,
+      }),
+    )
+    .reduce((s, o) => s + (Number(o.total) || 0), 0);
 
   const byOrder: OrderFinanceRow[] = [];
   const itemMap = new Map<string, ItemFinanceRow>();

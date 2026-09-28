@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
+import { AramisLogo } from "@/components/brand/AramisLogo";
 import { APP_MODULE_LABELS, moduleFlag, type AppModule } from "@/lib/tenant";
 import { formatDateTime } from "@/lib/utils";
 
@@ -111,10 +112,10 @@ export default function PendingPage() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-stone px-4 py-8">
       <div className="w-full max-w-lg rounded-3xl border border-ink/8 bg-white p-6 shadow-sm sm:p-8">
-        <p className="text-center text-[11px] font-semibold uppercase tracking-[0.2em] text-teal">
-          Aramis Product
-        </p>
-        <h1 className="mt-3 text-center font-display text-2xl text-ink">
+        <div className="flex justify-center">
+          <AramisLogo variant="mark" className="h-12 w-12" />
+        </div>
+        <h1 className="mt-4 text-center font-display text-2xl text-ink">
           Waiting for access
         </h1>
         <p className="mt-2 text-center text-sm text-ink/60">

@@ -53,6 +53,8 @@ export type SaleOrderStatus =
   | "ready"
   | "completed"
   | "canceled";
+/** Money lifecycle — independent of kitchen status. */
+export type SalePaymentStatus = "unpaid" | "paid";
 export type SubStatus =
   | "trialing"
   | "active"
@@ -288,4 +290,9 @@ export const SALE_ORDER_STATUS_LABELS: Record<SaleOrderStatus, string> = {
   ready: "Ready",
   completed: "Completed",
   canceled: "Canceled",
+};
+
+export const SALE_PAYMENT_STATUS_LABELS: Record<SalePaymentStatus, string> = {
+  unpaid: "Unpaid",
+  paid: "Paid",
 };

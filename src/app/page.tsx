@@ -5,6 +5,8 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
+import { AramisLogo } from "@/components/brand/AramisLogo";
+import { isOwner } from "@/lib/permissions";
 
 /**
  * Public home: show Sign in / Create account.
@@ -43,7 +45,11 @@ export default function HomePage() {
       return;
     }
     if (accessBlocked) {
-      router.replace("/app/billing");
+      router.replace(
+        tenant && isOwner(tenant.membership)
+          ? "/app/settings?tab=billing"
+          : "/app",
+      );
       return;
     }
     if (tenant) router.replace("/app");
@@ -93,10 +99,10 @@ export default function HomePage() {
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-teal">
             Welcome
           </p>
-          <h1 className="mt-3 font-display text-5xl tracking-tight text-gold sm:text-6xl">
-            Aramis Product
-          </h1>
-          <p className="mx-auto mt-4 max-w-sm text-sm text-stone/70">
+          <div className="mt-4 flex justify-center">
+            <AramisLogo priority className="h-14 sm:h-16" />
+          </div>
+          <p className="mx-auto mt-5 max-w-sm text-sm text-stone/70">
             Café & restaurant counter. Sign in if you already have access, or
             create an account to get started.
           </p>

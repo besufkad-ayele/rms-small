@@ -1,36 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { loadProfile } from "@/lib/cloud-auth";
 import { PlatformDashboard } from "@/components/platform/PlatformDashboard";
 
 export default function PlatformPage() {
-  const { ready, user, logout } = useAuth();
+  const { ready, sessionResolved, user, isPlatformAdmin, logout } = useAuth();
   const router = useRouter();
-  const [allowed, setAllowed] = useState(false);
-  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !sessionResolved) return;
     if (!user) {
       router.replace("/login");
-      return;
     }
-    void (async () => {
-      const profile = await loadProfile();
-      if (!profile?.is_platform_admin) {
-        setAllowed(false);
-        setChecking(false);
-        return;
-      }
-      setAllowed(true);
-      setChecking(false);
-    })();
-  }, [ready, user, router]);
+  }, [ready, sessionResolved, user, router]);
 
-  if (!ready || checking) {
+  if (!ready || !sessionResolved || !user) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-stone">
         <p className="text-sm text-ink/60">Loading platform…</p>
@@ -38,7 +24,7 @@ export default function PlatformPage() {
     );
   }
 
-  if (!allowed) {
+  if (!isPlatformAdmin) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-stone px-4">
         <p className="text-sm text-ink/70">

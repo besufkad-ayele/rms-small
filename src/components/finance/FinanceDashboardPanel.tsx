@@ -1,14 +1,13 @@
 "use client";
 
-import { Fragment, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
+  CalendarDays,
   Download,
-  ImagePlus,
   LayoutDashboard,
   LayoutList,
   ListOrdered,
   Receipt,
-  Trash2,
   Wallet,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -21,12 +20,8 @@ import {
   getSpendDashboard,
   type SpendDashboard,
 } from "@/lib/cloud-bills";
-import {
-  listCloudDayCloses,
-} from "@/lib/cloud-sales";
-import { saveDayCloseResilient } from "@/lib/offline/resilient";
-import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import { PaidBillsPanel } from "@/components/finance/PaidBillsPanel";
+import { DailySalesPanel } from "@/components/finance/DailySalesPanel";
 import { ReceiptDesigner } from "@/components/finance/ReceiptDesigner";
 import { SparkLines } from "@/components/finance/SparkLines";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
@@ -36,7 +31,7 @@ import {
   type DateFilterState,
 } from "@/lib/date-range";
 import type { ReportPeriod } from "@/lib/types";
-import { cn, dayKey, formatDateTime, formatMoney } from "@/lib/utils";
+import { cn, formatDateTime, formatMoney } from "@/lib/utils";
 
 const PERIODS: { id: ReportPeriod; label: string }[] = [
   { id: "today", label: "Today" },
@@ -47,10 +42,11 @@ const PERIODS: { id: ReportPeriod; label: string }[] = [
 ];
 
 type ViewMode = "orders" | "items";
-type MainTab = "overall" | "finance" | "spend" | "receipt";
+type MainTab = "overall" | "daily" | "finance" | "spend" | "receipt";
 
 const TABS: { id: MainTab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "overall", label: "Overall", icon: LayoutDashboard },
+  { id: "daily", label: "Daily", icon: CalendarDays },
   { id: "finance", label: "Finance", icon: ListOrdered },
   { id: "spend", label: "Spend", icon: Wallet },
   { id: "receipt", label: "Receipt & tax", icon: Receipt },
@@ -58,7 +54,6 @@ const TABS: { id: MainTab; label: string; icon: typeof LayoutDashboard }[] = [
 
 export function FinanceDashboardPanel() {
   const { tenant } = useAuth();
-  const { refreshPendingCount } = useOfflineSync();
   const orgId = tenant!.organization.id;
   const [tab, setTab] = useState<MainTab>("overall");
   const [filter, setFilter] = useState<DateFilterState>(() =>
@@ -70,13 +65,6 @@ export function FinanceDashboardPanel() {
   const [view, setView] = useState<ViewMode>("orders");
   const [dash, setDash] = useState<FinanceDashboard | null>(null);
   const [spend, setSpend] = useState<SpendDashboard | null>(null);
-  const [closes, setCloses] = useState<
-    Awaited<ReturnType<typeof listCloudDayCloses>>
-  >([]);
-  const [declared, setDeclared] = useState("");
-  const [note, setNote] = useState("");
-  const [proofs, setProofs] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
@@ -84,19 +72,16 @@ export function FinanceDashboardPanel() {
   const rangeText = dash?.rangeLabel ?? filterLabel(filter);
 
   const reload = useCallback(async () => {
+    // Keep showing prior data while revalidating (no full-page skeleton flash).
     setLoading(true);
     try {
       const s = await getSpendDashboard(orgId, filter);
-      const [d, c] = await Promise.all([
-        getFinanceDashboard(orgId, filter, s.spendByDay),
-        listCloudDayCloses(orgId),
-      ]);
+      const d = await getFinanceDashboard(orgId, filter, s.spendByDay);
       setSpend(s);
       setDash({
         ...d,
         priorSpend: s.priorPeriodSpent,
       });
-      setCloses(c);
     } finally {
       setLoading(false);
     }
@@ -164,12 +149,6 @@ export function FinanceDashboardPanel() {
       ],
     };
   }, [dash?.series]);
-
-  const expected = revenue;
-  const variance = useMemo(() => {
-    const d = Number(declared) || 0;
-    return Math.round((d - expected) * 100) / 100;
-  }, [declared, expected]);
 
   function exportExcel() {
     if (!dash || !tenant) return;
@@ -254,91 +233,45 @@ export function FinanceDashboardPanel() {
     ]);
   }
 
-  async function onProofs(files: FileList | null) {
-    if (!files) return;
-    const reads = [...files].slice(0, 6).map(
-      (file) =>
-        new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result));
-          reader.onerror = () => reject(reader.error);
-          reader.readAsDataURL(file);
-        }),
-    );
-    const images = await Promise.all(reads);
-    setProofs((prev) => [...prev, ...images].slice(0, 8));
-  }
-
-  async function onDayClose(e: FormEvent) {
-    e.preventDefault();
-    if (!tenant) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const todayExpected =
-        filter.period === "today" && !filter.fromDate && !filter.toDate
-          ? expected
-          : (dash?.byOrder
-              .filter((o) => o.dayKey === dayKey())
-              .reduce((s, o) => s + o.total, 0) ?? 0);
-      const { offlineQueued } = await saveDayCloseResilient({
-        orgId,
-        dayKey: dayKey(),
-        expectedSalesTotal: todayExpected,
-        declaredCashTotal: Number(declared) || 0,
-        note,
-        proofImages: proofs,
-        closedBy: tenant.profile.full_name,
-      });
-      setDeclared("");
-      setNote("");
-      setProofs([]);
-      if (offlineQueued) await refreshPendingCount();
-      await reload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Close failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} />
 
-        <div className="flex flex-wrap items-center gap-2">
-          {PERIODS.map((p) => (
+        {tab !== "daily" && tab !== "receipt" ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {PERIODS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => selectPeriod(p.id)}
+                className={cn(
+                  "rounded-full px-3 py-1.5 text-xs font-medium",
+                  filter.period === p.id && !usingCustom
+                    ? "bg-teal text-white"
+                    : "bg-ink/5 text-ink/70",
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
             <button
-              key={p.id}
               type="button"
-              onClick={() => selectPeriod(p.id)}
+              onClick={() => setCustomOpen((o) => !o)}
               className={cn(
                 "rounded-full px-3 py-1.5 text-xs font-medium",
-                filter.period === p.id && !usingCustom
-                  ? "bg-teal text-white"
+                usingCustom || customOpen
+                  ? "bg-ink text-stone"
                   : "bg-ink/5 text-ink/70",
               )}
             >
-              {p.label}
+              {usingCustom ? "Custom range" : "Custom…"}
             </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => setCustomOpen((o) => !o)}
-            className={cn(
-              "rounded-full px-3 py-1.5 text-xs font-medium",
-              usingCustom || customOpen
-                ? "bg-ink text-stone"
-                : "bg-ink/5 text-ink/70",
-            )}
-          >
-            {usingCustom ? "Custom range" : "Custom…"}
-          </button>
-        </div>
+          </div>
+        ) : null}
       </div>
 
-      {customOpen || usingCustom ? (
+      {tab !== "daily" && tab !== "receipt" && (customOpen || usingCustom) ? (
         <section className="rounded-3xl border border-ink/8 bg-white/90 p-4 sm:p-5">
           <p className="text-sm text-ink/60">
             Optional — pick a from/to range only if you need something outside
@@ -384,12 +317,14 @@ export function FinanceDashboardPanel() {
         </section>
       ) : null}
 
-      {loading && !dash ? (
+      {loading && !dash && tab !== "daily" && tab !== "receipt" ? (
         <div className="space-y-3">
           <div className="h-40 animate-pulse rounded-3xl bg-ink/5" />
           <div className="h-24 animate-pulse rounded-3xl bg-ink/5" />
         </div>
       ) : null}
+
+      {tab === "daily" ? <DailySalesPanel /> : null}
 
       {tab === "overall" ? (
         <section className="rounded-3xl border border-ink/8 bg-gradient-to-br from-ink via-ink to-teal/80 p-5 text-stone shadow-xl sm:p-6">
@@ -765,126 +700,18 @@ export function FinanceDashboardPanel() {
             )}
           </section>
 
-          <section className="rounded-3xl border border-ink/8 bg-white/90 p-4 sm:p-5">
-            <h2 className="font-display text-xl">Cash vs system (day close)</h2>
-            <p className="mt-1 text-sm text-ink/55">
-              Expected total from today&apos;s recorded orders vs what you
-              collected
-            </p>
-            <form
-              className="mt-4 space-y-3"
-              onSubmit={(e) => void onDayClose(e)}
+          <p className="rounded-2xl border border-ink/8 bg-stone/40 px-4 py-3 text-sm text-ink/60">
+            Day close, X-Report and Z-Report live under the{" "}
+            <button
+              type="button"
+              className="font-semibold text-teal underline-offset-2 hover:underline"
+              onClick={() => setTab("daily")}
             >
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl bg-stone/60 px-3 py-3 text-sm">
-                  <p className="text-ink/55">Expected (system today)</p>
-                  <p className="mt-1 font-display text-2xl text-teal">
-                    {formatMoney(
-                      filter.period === "today" &&
-                        !filter.fromDate &&
-                        !filter.toDate
-                        ? expected
-                        : (dash?.byOrder
-                            .filter((o) => o.dayKey === dayKey())
-                            .reduce((s, o) => s + o.total, 0) ?? 0),
-                    )}
-                  </p>
-                </div>
-                <label className="block text-sm">
-                  <span className="mb-1 block text-ink/60">
-                    Declared received
-                  </span>
-                  <input
-                    required
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    className="field"
-                    value={declared}
-                    onChange={(e) => setDeclared(e.target.value)}
-                  />
-                  <p
-                    className={cn(
-                      "mt-1 text-xs",
-                      variance >= 0 ? "text-teal" : "text-coral",
-                    )}
-                  >
-                    Variance: {formatMoney(variance)}
-                  </p>
-                </label>
-              </div>
-              <textarea
-                className="field min-h-20"
-                placeholder="Notes"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-              />
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-ink/20 bg-stone/40 px-3 py-2 text-sm">
-                <ImagePlus className="h-4 w-4" />
-                Payment screenshots
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => void onProofs(e.target.files)}
-                />
-              </label>
-              {proofs.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {proofs.map((src, i) => (
-                    <div
-                      key={i}
-                      className="relative h-16 w-16 overflow-hidden rounded-lg"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={src}
-                        alt=""
-                        className="h-full w-full object-cover"
-                      />
-                      <button
-                        type="button"
-                        className="absolute right-0.5 top-0.5 rounded bg-ink/70 p-0.5 text-white"
-                        onClick={() =>
-                          setProofs((p) => p.filter((_, idx) => idx !== i))
-                        }
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              <button
-                type="submit"
-                disabled={busy}
-                className="w-full rounded-xl bg-ink py-3 text-sm font-semibold text-stone disabled:opacity-50"
-              >
-                Save day close verification
-              </button>
-            </form>
-            <ul className="mt-4 space-y-2">
-              {closes.slice(0, 5).map((c) => (
-                <li
-                  key={c.id}
-                  className="rounded-2xl border border-ink/8 bg-stone/40 px-3 py-2 text-sm"
-                >
-                  <div className="flex justify-between gap-2">
-                    <span className="font-medium">{c.day_key}</span>
-                    <span
-                      className={
-                        Number(c.variance) === 0 ? "text-teal" : "text-coral"
-                      }
-                    >
-                      Δ {formatMoney(Number(c.variance))}
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-            {error ? <p className="mt-3 text-sm text-coral">{error}</p> : null}
-          </section>
+              Daily
+            </button>{" "}
+            tab.
+          </p>
+          {error ? <p className="text-sm text-coral">{error}</p> : null}
         </>
       ) : null}
 

@@ -17,6 +17,7 @@ import {
 import {
   completeCloudSale,
   saveCloudDayClose,
+  saveCloudXReport,
   type CloudSaleOrder,
 } from "@/lib/cloud-sales";
 import {
@@ -36,6 +37,7 @@ import { getConnectionSnapshot } from "./connection";
 import { recordSaleLocally } from "./local-sale";
 import { enqueueSyncAction } from "./queue";
 import type { CompleteSalePayload, SaleLineInput } from "./types";
+import { prefetchReceiptSettings } from "@/lib/org-tax";
 
 /** Force a full catalog re-download at most this often (unless Sync now). */
 const FULL_PULL_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 6 hours
@@ -233,6 +235,7 @@ export async function prefetchCatalog(orgId: string): Promise<void> {
   await Promise.all([
     pullMenuChanges(orgId, { full: true }),
     pullInventoryChanges(orgId, { full: true }),
+    prefetchReceiptSettings(orgId),
   ]);
 }
 
@@ -241,16 +244,22 @@ export async function completeSaleResilient(input: {
   lines: SaleLineInput[];
   paymentMethod: CompleteSalePayload["paymentMethod"];
   paymentReference?: string;
+  paymentProofUrl?: string | null;
   cashierName: string;
   placeLabel?: string;
   kitchenNote?: string;
+  markPaid?: boolean;
 }): Promise<{ order: CloudSaleOrder; offlineQueued: boolean }> {
   const payload: CompleteSalePayload = {
     orgId: input.orgId,
     lines: input.lines,
     paymentMethod: input.paymentMethod,
     paymentReference: input.paymentReference,
+    paymentProofUrl: input.paymentProofUrl,
     cashierName: input.cashierName,
+    placeLabel: input.placeLabel,
+    kitchenNote: input.kitchenNote,
+    markPaid: Boolean(input.markPaid),
   };
 
   if (shouldPreferCloud()) {
@@ -371,6 +380,21 @@ export async function saveDayCloseResilient(
     }
   }
   await enqueueSyncAction(input.orgId, "SAVE_DAY_CLOSE", input);
+  return { offlineQueued: true };
+}
+
+export async function saveXReportResilient(
+  input: Parameters<typeof saveCloudXReport>[0],
+): Promise<{ offlineQueued: boolean }> {
+  if (canReachCloud()) {
+    try {
+      await saveCloudXReport(input);
+      return { offlineQueued: false };
+    } catch {
+      // queue
+    }
+  }
+  await enqueueSyncAction(input.orgId, "SAVE_X_REPORT", input);
   return { offlineQueued: true };
 }
 

@@ -443,3 +443,68 @@ export async function listOrgPaymentProofs(organizationId: string) {
   if (error) throw new Error(error.message);
   return data || [];
 }
+
+export async function updateMyProfile(input: {
+  fullName: string;
+  phone?: string;
+}) {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in." };
+  const fullName = input.fullName.trim();
+  if (!fullName) return { error: "Name is required." };
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      full_name: fullName,
+      phone: input.phone?.trim() || null,
+    })
+    .eq("id", user.id);
+  if (error) return { error: error.message };
+  await supabase.auth.updateUser({
+    data: {
+      full_name: fullName,
+      phone: input.phone?.trim() || null,
+    },
+  });
+  return { ok: true as const };
+}
+
+export async function updateMyPassword(input: {
+  password: string;
+}) {
+  const password = input.password;
+  if (password.length < 8) {
+    return { error: "Password must be at least 8 characters." };
+  }
+  const supabase = createClient();
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) return { error: error.message };
+  return { ok: true as const };
+}
+
+/** Owner business profile fields (not verification docs). */
+export async function updateOrganizationProfile(input: {
+  orgId: string;
+  name: string;
+  phone?: string;
+  address?: string;
+  email?: string;
+}) {
+  const supabase = createClient();
+  const name = input.name.trim();
+  if (!name) return { error: "Business name is required." };
+  const { error } = await supabase
+    .from("organizations")
+    .update({
+      name,
+      phone: input.phone?.trim() || null,
+      address: input.address?.trim() || null,
+      email: input.email?.trim() || null,
+    })
+    .eq("id", input.orgId);
+  if (error) return { error: error.message };
+  return { ok: true as const };
+}

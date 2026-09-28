@@ -37,20 +37,26 @@ export function ReceiptDesigner({
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
+  function applyLoaded(s: OrgReceiptSettings) {
+    setSettings({
+      ...s,
+      profile: {
+        ...s.profile,
+        businessName: s.profile.businessName || defaults?.businessName || "",
+        phone: s.profile.phone || defaults?.phone || "",
+        address: s.profile.address || defaults?.address || "",
+      },
+    });
+  }
+
   useEffect(() => {
     void (async () => {
       try {
-        const s = await getOrgReceiptSettings(orgId);
-        setSettings({
-          ...s,
-          profile: {
-            ...s.profile,
-            businessName:
-              s.profile.businessName || defaults?.businessName || "",
-            phone: s.profile.phone || defaults?.phone || "",
-            address: s.profile.address || defaults?.address || "",
-          },
+        // Instant from browser cache; soft-refreshes only if finance revision changed.
+        const s = await getOrgReceiptSettings(orgId, {
+          onFresh: (fresh) => applyLoaded(fresh),
         });
+        applyLoaded(s);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Could not load receipt");
       } finally {
@@ -75,7 +81,8 @@ export function ReceiptDesigner({
     setMessage(null);
     setError(null);
     try {
-      await saveOrgReceiptSettings(orgId, settings);
+      const saved = await saveOrgReceiptSettings(orgId, settings);
+      setSettings(saved);
       setMessage("Receipt design saved — used on new orders and prints.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");

@@ -1,27 +1,33 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 import { AppShell } from "@/components/layout/AppShell";
+import { isOwner } from "@/lib/permissions";
 import type { AppModule } from "@/lib/tenant";
 import type { StaffFeature } from "@/lib/permissions";
 
-export function RequireAuth({
-  children,
-  title,
-  module,
-  feature,
-  allowWhenBlocked,
-}: {
+type GateProps = {
   children: React.ReactNode;
   title?: string;
   module?: AppModule;
   /** Granular staff feature (order, menu, inventory, finance, billing, staff) */
   feature?: StaffFeature;
+  /** Restrict to organization owner (Settings & Billing). */
+  ownerOnly?: boolean;
   allowWhenBlocked?: boolean;
-}) {
+  /** When false, skip AppShell (used inside a layout that already has the shell). */
+  withShell?: boolean;
+};
+
+function useAuthGate({
+  module,
+  feature,
+  ownerOnly,
+  allowWhenBlocked: allowWhenBlockedProp,
+}: Pick<GateProps, "module" | "feature" | "ownerOnly" | "allowWhenBlocked">) {
   const {
     ready,
     sessionResolved,
@@ -38,6 +44,13 @@ export function RequireAuth({
     refresh,
   } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const allowWhenBlocked =
+    allowWhenBlockedProp ||
+    pathname.startsWith("/app/settings") ||
+    pathname.startsWith("/app/billing");
+
+  const owner = tenant ? isOwner(tenant.membership) : false;
 
   useEffect(() => {
     if (!ready || !sessionResolved) return;
@@ -61,9 +74,13 @@ export function RequireAuth({
       return;
     }
     if (accessBlocked && !allowWhenBlocked && !awaitingVerification) {
-      if (hasFeature("billing")) {
-        router.replace("/app/billing");
+      if (owner) {
+        router.replace("/app/settings?tab=billing");
       }
+      return;
+    }
+    if (ownerOnly && tenant && !owner && !accessBlocked) {
+      router.replace("/app");
       return;
     }
     if (module && tenant && !hasModule(module) && !accessBlocked) {
@@ -83,6 +100,8 @@ export function RequireAuth({
     allowWhenBlocked,
     module,
     feature,
+    ownerOnly,
+    owner,
     tenant,
     hasMembership,
     tenantError,
@@ -92,8 +111,60 @@ export function RequireAuth({
     router,
   ]);
 
+  return {
+    ready,
+    sessionResolved,
+    user,
+    tenant,
+    tenantError,
+    needsOnboarding,
+    awaitingVerification,
+    accessBlocked,
+    hasModule,
+    hasFeature,
+    owner,
+    ownerOnly,
+    refresh,
+    module,
+    feature,
+    allowWhenBlocked,
+  };
+}
+
+function GateBody({
+  children,
+  title,
+  withShell = true,
+  gate,
+}: {
+  children: React.ReactNode;
+  title?: string;
+  withShell?: boolean;
+  gate: ReturnType<typeof useAuthGate>;
+}) {
+  const {
+    ready,
+    sessionResolved,
+    user,
+    tenant,
+    tenantError,
+    needsOnboarding,
+    awaitingVerification,
+    accessBlocked,
+    hasModule,
+    hasFeature,
+    owner,
+    ownerOnly,
+    refresh,
+    module,
+    feature,
+    allowWhenBlocked,
+  } = gate;
+
   if (!ready || !sessionResolved || !user) {
-    return <AuthLoadingScreen message="Loading Aramis…" />;
+    return withShell ? (
+      <AuthLoadingScreen message="Loading Aramis…" />
+    ) : null;
   }
 
   if (tenantError && !tenant) {
@@ -113,11 +184,15 @@ export function RequireAuth({
   }
 
   if (needsOnboarding) {
-    return <AuthLoadingScreen message="Opening Aramis…" />;
+    return withShell ? (
+      <AuthLoadingScreen message="Opening Aramis…" />
+    ) : null;
   }
 
   if (!tenant) {
-    return <AuthLoadingScreen message="Loading Aramis…" />;
+    return withShell ? (
+      <AuthLoadingScreen message="Loading Aramis…" />
+    ) : null;
   }
 
   if (awaitingVerification && !allowWhenBlocked) {
@@ -129,7 +204,7 @@ export function RequireAuth({
   }
 
   if (accessBlocked && !allowWhenBlocked) {
-    if (!hasFeature("billing")) {
+    if (!owner) {
       return (
         <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-stone px-4 text-center text-ink">
           <p className="font-display text-xl">Access paused</p>
@@ -142,14 +217,24 @@ export function RequireAuth({
     }
     return (
       <div className="flex min-h-dvh items-center justify-center bg-stone text-ink">
-        <p className="text-sm text-ink/60">Redirecting to billing…</p>
+        <p className="text-sm text-ink/60">Redirecting to settings…</p>
+      </div>
+    );
+  }
+
+  if (ownerOnly && !owner) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center text-ink">
+        <p className="text-sm text-ink/60">
+          Only the business owner can open Settings & Billing.
+        </p>
       </div>
     );
   }
 
   if (module && !hasModule(module) && !accessBlocked) {
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-stone text-ink">
+      <div className="flex min-h-[40vh] items-center justify-center text-ink">
         <p className="text-sm text-ink/60">Module not enabled…</p>
       </div>
     );
@@ -157,11 +242,52 @@ export function RequireAuth({
 
   if (feature && !hasFeature(feature) && !accessBlocked) {
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-stone text-ink">
+      <div className="flex min-h-[40vh] items-center justify-center text-ink">
         <p className="text-sm text-ink/60">You don’t have access to this area…</p>
       </div>
     );
   }
 
-  return <AppShell title={title}>{children}</AppShell>;
+  if (withShell) {
+    return <AppShell title={title}>{children}</AppShell>;
+  }
+
+  return <>{children}</>;
+}
+
+/** Full auth gate + AppShell. Use once in `/app` layout so the shell stays mounted. */
+export function RequireAuth({
+  children,
+  title,
+  module,
+  feature,
+  ownerOnly,
+  allowWhenBlocked,
+  withShell = true,
+}: GateProps) {
+  const gate = useAuthGate({ module, feature, ownerOnly, allowWhenBlocked });
+  return (
+    <GateBody title={title} withShell={withShell} gate={gate}>
+      {children}
+    </GateBody>
+  );
+}
+
+/**
+ * Module/feature gate without remounting AppShell.
+ * Use on individual `/app/*` pages inside the shared layout.
+ */
+export function RequireAccess({
+  children,
+  module,
+  feature,
+  ownerOnly,
+  allowWhenBlocked,
+}: Omit<GateProps, "title" | "withShell">) {
+  const gate = useAuthGate({ module, feature, ownerOnly, allowWhenBlocked });
+  return (
+    <GateBody withShell={false} gate={gate}>
+      {children}
+    </GateBody>
+  );
 }

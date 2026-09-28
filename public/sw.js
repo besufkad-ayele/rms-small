@@ -1,6 +1,11 @@
 /* Aramis Product service worker — cache shell for installable PWA */
-const CACHE = "aramis-shell-v1";
-const PRECACHE = ["/", "/app", "/login", "/icons/icon-192.png", "/icons/icon-512.png"];
+const CACHE = "aramis-shell-v4";
+const PRECACHE = [
+  "/icons/android-chrome-192x192.png",
+  "/icons/android-chrome-512x512.png",
+  "/Aramis_Logo.png",
+  "/Aramis_Logo_on_dark.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -23,8 +28,11 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  // Never cache health checks or API mutations paths
-  if (url.pathname.startsWith("/api/")) return;
+  // Never intercept Next.js / Turbopack bundles — hashed chunks must always
+  // come from the network so HMR and deploys cannot serve stale factories.
+  if (url.pathname.startsWith("/_next/") || url.pathname.startsWith("/api/")) {
+    return;
+  }
 
   // Network-first for navigations; fall back to cache so the app opens offline
   if (req.mode === "navigate") {
@@ -42,9 +50,8 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Cache-first for static assets
+  // Cache-first for icons / static images only (not JS/CSS chunks)
   if (
-    url.pathname.startsWith("/_next/static/") ||
     url.pathname.startsWith("/icons/") ||
     url.pathname.endsWith(".svg") ||
     url.pathname.endsWith(".png") ||

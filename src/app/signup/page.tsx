@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { SignupScreen } from "@/components/auth/SignupScreen";
 import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { isOwner } from "@/lib/permissions";
 
 export default function SignupPage() {
   const {
@@ -39,7 +40,11 @@ export default function SignupPage() {
       return;
     }
     if (accessBlocked) {
-      router.replace("/app/billing");
+      router.replace(
+        isOwner(tenant.membership)
+          ? "/app/settings?tab=billing"
+          : "/app",
+      );
       return;
     }
     router.replace("/app");

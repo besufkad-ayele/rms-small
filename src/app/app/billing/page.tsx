@@ -1,12 +1,14 @@
 "use client";
 
-import { RequireAuth } from "@/components/auth/RequireAuth";
-import { BillingPanel } from "@/components/billing/BillingPanel";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 
-export default function BillingPage() {
-  return (
-    <RequireAuth title="Billing" feature="billing" allowWhenBlocked>
-      <BillingPanel />
-    </RequireAuth>
-  );
+/** Legacy billing URL → Settings & Billing. */
+export default function BillingRedirectPage() {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace("/app/settings?tab=billing");
+  }, [router]);
+  return <AuthLoadingScreen message="Opening settings…" />;
 }

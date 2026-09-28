@@ -40,17 +40,19 @@ export function ThermalReceipt({
 
   useEffect(() => {
     if (!orgId) return;
-    void getOrgReceiptSettings(orgId)
-      .then((s) => {
-        setProfile({
-          ...s.profile,
-          businessName: s.profile.businessName || businessName,
-          phone: s.profile.phone || phone || "",
-          address: s.profile.address || address || "",
-        });
-        if (order.vat_percent == null) setVatPercent(s.vat_percent);
-        if (order.service_percent == null) setServicePercent(s.service_percent);
-      })
+    const apply = (s: Awaited<ReturnType<typeof getOrgReceiptSettings>>) => {
+      setProfile({
+        ...s.profile,
+        businessName: s.profile.businessName || businessName,
+        phone: s.profile.phone || phone || "",
+        address: s.profile.address || address || "",
+      });
+      if (order.vat_percent == null) setVatPercent(s.vat_percent);
+      if (order.service_percent == null) setServicePercent(s.service_percent);
+    };
+    // Cached finance receipt details — no network unless revision changed.
+    void getOrgReceiptSettings(orgId, { onFresh: apply })
+      .then(apply)
       .catch(() => undefined);
   }, [orgId, businessName, phone, address, order.vat_percent, order.service_percent]);
 

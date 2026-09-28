@@ -11,6 +11,7 @@ export type SyncActionType =
   | "UPSERT_MENU"
   | "DELETE_MENU"
   | "SAVE_DAY_CLOSE"
+  | "SAVE_X_REPORT"
   | "CREATE_PAID_BILL"
   | "DELETE_PAID_BILL";
 
@@ -52,7 +53,12 @@ export interface CompleteSalePayload {
   lines: SaleLineInput[];
   paymentMethod: PaymentMethod;
   paymentReference?: string;
+  paymentProofUrl?: string | null;
   cashierName: string;
+  placeLabel?: string;
+  kitchenNote?: string;
+  /** Accept payment at Mark as paid (place stays unpaid). */
+  markPaid?: boolean;
   /** Populated when the sale was recorded locally first. */
   localOrder?: CloudSaleOrder;
 }

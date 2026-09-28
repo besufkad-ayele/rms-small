@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
+import { isOwner } from "@/lib/permissions";
 
 /**
  * After login/signup: stay on a loading screen until session + membership
@@ -60,7 +61,11 @@ export function PostAuthRouter({
     }
 
     if (accessBlocked) {
-      router.replace("/app/billing");
+      router.replace(
+        isOwner(tenant.membership)
+          ? "/app/settings?tab=billing"
+          : "/app",
+      );
       return;
     }
 
