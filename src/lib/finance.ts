@@ -46,6 +46,7 @@ export type SeriesPoint = {
   revenue: number;
   spend: number;
   net: number;
+  orders: number;
 };
 
 export type FinanceDashboard = {
@@ -111,16 +112,20 @@ function buildSeries(
   spendByDay: Map<string, number>,
   range: DateRange,
 ): SeriesPoint[] {
-  const byDay = new Map<string, { revenue: number; spend: number }>();
+  const byDay = new Map<
+    string,
+    { revenue: number; spend: number; orders: number }
+  >();
 
   for (const o of orders) {
     const key = String(o.created_at).slice(0, 10);
-    const prev = byDay.get(key) || { revenue: 0, spend: 0 };
+    const prev = byDay.get(key) || { revenue: 0, spend: 0, orders: 0 };
     prev.revenue += Number(o.total) || 0;
+    prev.orders += 1;
     byDay.set(key, prev);
   }
   for (const [day, amt] of spendByDay) {
-    const prev = byDay.get(day) || { revenue: 0, spend: 0 };
+    const prev = byDay.get(day) || { revenue: 0, spend: 0, orders: 0 };
     prev.spend += amt;
     byDay.set(day, prev);
   }
@@ -136,7 +141,7 @@ function buildSeries(
         const d = new Date(range.from);
         d.setDate(d.getDate() + i);
         const key = d.toISOString().slice(0, 10);
-        if (!byDay.has(key)) byDay.set(key, { revenue: 0, spend: 0 });
+        if (!byDay.has(key)) byDay.set(key, { revenue: 0, spend: 0, orders: 0 });
       }
     }
   }
@@ -149,6 +154,7 @@ function buildSeries(
       revenue: Math.round(v.revenue * 100) / 100,
       spend: Math.round(v.spend * 100) / 100,
       net: Math.round((v.revenue - v.spend) * 100) / 100,
+      orders: v.orders,
     }));
 }
 

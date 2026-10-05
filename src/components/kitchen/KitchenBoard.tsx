@@ -23,14 +23,18 @@ import { CSS } from "@dnd-kit/utilities";
 import { Check, ChefHat, Clock, GripVertical } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import {
+  lineKitchenStatus,
+  lineRound,
   listCloudOrders,
   listKitchenOrders,
+  orderLines,
+  updateKitchenRound,
   updateOrderStatus,
+  type CloudSaleLine,
   type CloudSaleOrder,
 } from "@/lib/cloud-sales";
 import {
   SALE_ORDER_STATUS_LABELS,
-  type SaleOrderStatus,
 } from "@/lib/tenant";
 import { cn, dayKey, formatMoney } from "@/lib/utils";
 
@@ -52,6 +56,73 @@ function nextLabel(next: AdvanceStatus) {
   if (next === "preparing") return "Start prep";
   if (next === "ready") return "Mark ready";
   return "Mark served";
+}
+
+type KitchenTicket = {
+  key: string;
+  order: CloudSaleOrder;
+  round: number;
+  status: KitchenColumnStatus;
+  lines: CloudSaleLine[];
+  sentAt: string;
+  addon: boolean;
+};
+
+function ticketsFor(order: CloudSaleOrder): KitchenTicket[] {
+  const lines = orderLines(order);
+  const tracked = lines.some(
+    (line) => line.kitchen_status || Number(line.round) > 1,
+  );
+  if (!tracked) {
+    if (
+      order.status !== "placed" &&
+      order.status !== "preparing" &&
+      order.status !== "ready"
+    ) {
+      return [];
+    }
+    return [
+      {
+        key: order.id,
+        order,
+        round: 1,
+        status: order.status,
+        lines,
+        sentAt: order.created_at,
+        addon: false,
+      },
+    ];
+  }
+  const byRound = new Map<number, CloudSaleLine[]>();
+  for (const line of lines) {
+    const round = lineRound(line);
+    byRound.set(round, [...(byRound.get(round) || []), line]);
+  }
+  return [...byRound.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .flatMap(([round, group]) => {
+      const status = lineKitchenStatus(group[0], order.status);
+      if (status === "served") return [];
+      return [
+        {
+          key: `${order.id}::${round}`,
+          order,
+          round,
+          status,
+          lines: group,
+          sentAt: group.find((line) => line.sent_at)?.sent_at || order.created_at,
+          addon: round > 1,
+        },
+      ];
+    });
+}
+
+function waitMinutes(iso: string) {
+  return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+}
+
+function itemCount(lines: CloudSaleLine[]) {
+  return lines.reduce((sum, line) => sum + Number(line.quantity), 0);
 }
 
 export function KitchenBoard() {
@@ -121,40 +192,75 @@ export function KitchenBoard() {
     };
   }, [servedToday]);
 
-  const activeOrder = useMemo(
-    () => orders.find((o) => o.id === activeId) ?? null,
-    [orders, activeId],
+  const tickets = useMemo(() => orders.flatMap(ticketsFor), [orders]);
+
+  const activeTicket = useMemo(
+    () => tickets.find((ticket) => ticket.key === activeId) ?? null,
+    [tickets, activeId],
   );
 
-  async function moveTo(orderId: string, status: AdvanceStatus) {
-    const order = orders.find((o) => o.id === orderId);
-    if (!order || order.status === status) return;
+  const queueStats = useMemo(() => {
+    const placed = tickets.filter((ticket) => ticket.status === "placed");
+    const oldest = placed.reduce(
+      (min, ticket) => Math.max(min, waitMinutes(ticket.sentAt)),
+      0,
+    );
+    return {
+      placed: placed.length,
+      preparing: tickets.filter((ticket) => ticket.status === "preparing").length,
+      ready: tickets.filter((ticket) => ticket.status === "ready").length,
+      addons: tickets.filter((ticket) => ticket.addon).length,
+      oldest,
+    };
+  }, [tickets]);
 
-    setBusyId(orderId);
-    // Optimistic: completed leaves the board; else move column.
+  async function moveTo(ticketKey: string, status: AdvanceStatus) {
+    const ticket = tickets.find((item) => item.key === ticketKey);
+    if (!ticket || ticket.status === status) return;
+
+    setBusyId(ticketKey);
+    const kitchenStatus = status === "completed" ? "served" : status;
     setOrders((prev) =>
-      status === "completed"
-        ? prev.filter((o) => o.id !== orderId)
-        : prev.map((o) =>
-            o.id === orderId
-              ? { ...o, status: status as SaleOrderStatus }
-              : o,
-          ),
+      prev.map((order) => {
+        if (order.id !== ticket.order.id) return order;
+        const lines = orderLines(order).map((line) =>
+          lineRound(line) === ticket.round
+            ? { ...line, kitchen_status: kitchenStatus }
+            : line,
+        );
+        const everyServed = lines.every(
+          (line) => line.kitchen_status === "served",
+        );
+        return {
+          ...order,
+          sale_order_lines: lines,
+          lines,
+          status: ticket.key.includes("::")
+            ? everyServed
+              ? "completed"
+              : order.status
+            : status === "completed"
+              ? "completed"
+              : status,
+        };
+      }),
     );
     try {
-      await updateOrderStatus(orgId, orderId, status);
+      if (ticketKey.includes("::")) {
+        await updateKitchenRound(orgId, ticket.order.id, ticket.round, kitchenStatus);
+      } else {
+        await updateOrderStatus(
+          orgId,
+          ticket.order.id,
+          status === "completed" ? "completed" : status,
+        );
+      }
       if (status === "completed") {
-        const lines = order.sale_order_lines || order.lines || [];
-        const items = lines.reduce((s, l) => s + Number(l.quantity), 0);
         setLastServed({
-          receipt: order.receipt_number,
-          total: Number(order.total) || 0,
-          items,
+          receipt: ticket.order.receipt_number,
+          total: Number(ticket.order.total) || 0,
+          items: itemCount(ticket.lines),
         });
-        setServedToday((prev) => [
-          { ...order, status: "completed" as SaleOrderStatus },
-          ...prev.filter((o) => o.id !== orderId),
-        ]);
       }
       await reload();
     } catch (e) {
@@ -171,7 +277,7 @@ export function KitchenBoard() {
 
   function onDragEnd(event: DragEndEvent) {
     setActiveId(null);
-    const orderId = String(event.active.id);
+    const ticketKey = String(event.active.id);
     const overId = event.over ? String(event.over.id) : null;
     if (!overId) return;
 
@@ -179,21 +285,21 @@ export function KitchenBoard() {
     if (COLUMN_IDS.has(overId)) {
       target = overId as KitchenColumnStatus;
     } else {
-      const overOrder = orders.find((o) => o.id === overId);
-      if (overOrder && COLUMN_IDS.has(overOrder.status)) {
-        target = overOrder.status as KitchenColumnStatus;
+      const overTicket = tickets.find((ticket) => ticket.key === overId);
+      if (overTicket && COLUMN_IDS.has(overTicket.status)) {
+        target = overTicket.status;
       }
     }
     if (!target) return;
-    void moveTo(orderId, target);
+    void moveTo(ticketKey, target);
   }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-ink/60">
-          Drag tickets between columns, or use the button — advance when prep
-          starts and when food is ready. Mark served when it leaves the kitchen.
+          Each send is its own ticket. Adding food to a table keeps one bill,
+          and the new dishes show up here as a fresh send.
         </p>
         <button
           type="button"
@@ -205,23 +311,37 @@ export function KitchenBoard() {
       </div>
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <div className="rounded-2xl border border-ink/8 bg-white/90 px-3 py-2.5">
-          <p className="text-[11px] text-ink/50">In kitchen</p>
-          <p className="mt-0.5 font-display text-xl">{orders.length}</p>
-        </div>
-        <div className="rounded-2xl border border-teal/25 bg-teal/5 px-3 py-2.5">
-          <p className="text-[11px] text-teal/80">Served today</p>
-          <p className="mt-0.5 font-display text-xl text-teal">
-            {servedStats.count}
+        <div className="rounded-2xl border border-gold/30 bg-gold/15 px-3 py-2.5">
+          <p className="text-[11px] text-ink/60">New sends</p>
+          <p className="mt-0.5 font-display text-xl">{queueStats.placed}</p>
+          <p className="text-[11px] text-ink/45">
+            {queueStats.oldest > 0
+              ? `Oldest waiting ${queueStats.oldest} min`
+              : "Nothing waiting"}
           </p>
         </div>
         <div className="rounded-2xl border border-ink/8 bg-white/90 px-3 py-2.5">
-          <p className="text-[11px] text-ink/50">Items out</p>
-          <p className="mt-0.5 font-display text-xl">{servedStats.items}</p>
+          <p className="text-[11px] text-ink/50">Cooking</p>
+          <p className="mt-0.5 font-display text-xl">{queueStats.preparing}</p>
+          <p className="text-[11px] text-ink/45">
+            {queueStats.addons} add-on{queueStats.addons === 1 ? "" : "s"}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-teal/25 bg-teal/5 px-3 py-2.5">
+          <p className="text-[11px] text-teal/80">Ready to serve</p>
+          <p className="mt-0.5 font-display text-xl text-teal">
+            {queueStats.ready}
+          </p>
+          <p className="text-[11px] text-ink/45">
+            {servedStats.count} tickets out today
+          </p>
         </div>
         <div className="rounded-2xl border border-ink/8 bg-white/90 px-3 py-2.5">
-          <p className="text-[11px] text-ink/50">Value served</p>
+          <p className="text-[11px] text-ink/50">Served today</p>
           <p className="mt-0.5 font-display text-xl">
+            {servedStats.items} items
+          </p>
+          <p className="text-[11px] text-ink/45">
             {formatMoney(servedStats.total)}
           </p>
         </div>
@@ -249,25 +369,25 @@ export function KitchenBoard() {
       >
         <div className="grid gap-3 lg:grid-cols-3">
           {COLUMNS.map((col) => {
-            const list = orders.filter((o) => o.status === col.status);
+            const list = tickets.filter((ticket) => ticket.status === col.status);
             return (
               <KitchenColumn
                 key={col.status}
                 status={col.status}
                 next={col.next}
-                orders={list}
+                tickets={list}
                 busyId={busyId}
                 activeId={activeId}
-                onAdvance={(order) => void moveTo(order.id, col.next)}
+                onAdvance={(ticket) => void moveTo(ticket.key, col.next)}
               />
             );
           })}
         </div>
 
         <DragOverlay dropAnimation={null}>
-          {activeOrder ? (
+          {activeTicket ? (
             <div className="rotate-1 scale-[1.02] opacity-95 shadow-lg">
-              <OrderCardBody order={activeOrder} dragging />
+              <OrderCardBody ticket={activeTicket} dragging />
             </div>
           ) : null}
         </DragOverlay>
@@ -279,17 +399,17 @@ export function KitchenBoard() {
 function KitchenColumn({
   status,
   next,
-  orders,
+  tickets,
   busyId,
   activeId,
   onAdvance,
 }: {
   status: KitchenColumnStatus;
   next: AdvanceStatus;
-  orders: CloudSaleOrder[];
+  tickets: KitchenTicket[];
   busyId: string | null;
   activeId: string | null;
-  onAdvance: (order: CloudSaleOrder) => void;
+  onAdvance: (ticket: KitchenTicket) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
@@ -307,21 +427,21 @@ function KitchenColumn({
         <ChefHat className="h-4 w-4 text-teal" />
         {SALE_ORDER_STATUS_LABELS[status]}
         <span className="rounded-full bg-ink/5 px-2 py-0.5 text-xs text-ink/50">
-          {orders.length}
+          {tickets.length}
         </span>
       </h2>
       <ul className="mt-3 min-h-28 space-y-3">
-        {orders.map((order) => (
+        {tickets.map((ticket) => (
           <DraggableOrderCard
-            key={order.id}
-            order={order}
+            key={ticket.key}
+            ticket={ticket}
             next={next}
-            busy={busyId === order.id}
-            hidden={activeId === order.id}
-            onAdvance={() => onAdvance(order)}
+            busy={busyId === ticket.key}
+            hidden={activeId === ticket.key}
+            onAdvance={() => onAdvance(ticket)}
           />
         ))}
-        {orders.length === 0 ? (
+        {tickets.length === 0 ? (
           <p
             className={cn(
               "rounded-2xl border border-dashed py-8 text-center text-sm",
@@ -339,20 +459,20 @@ function KitchenColumn({
 }
 
 function DraggableOrderCard({
-  order,
+  ticket,
   next,
   busy,
   hidden,
   onAdvance,
 }: {
-  order: CloudSaleOrder;
+  ticket: KitchenTicket;
   next: AdvanceStatus;
   busy: boolean;
   hidden: boolean;
   onAdvance: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({ id: order.id, disabled: busy });
+    useDraggable({ id: ticket.key, disabled: busy });
 
   const style = transform
     ? { transform: CSS.Translate.toString(transform) }
@@ -369,42 +489,14 @@ function DraggableOrderCard({
     >
       <div
         className={cn(
-          "rounded-2xl border border-ink/8 bg-stone/50 p-3",
+          "rounded-2xl border bg-stone/50 p-3",
+          ticket.addon ? "border-gold/50" : "border-ink/8",
           !busy && "cursor-grab active:cursor-grabbing",
         )}
         {...listeners}
         {...attributes}
       >
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <GripVertical className="h-4 w-4 shrink-0 text-ink/35" />
-              <p className="truncate font-medium">{order.receipt_number}</p>
-            </div>
-            {order.place_label ? (
-              <p className="mt-0.5 pl-6 text-xs text-teal">
-                Place: {order.place_label}
-              </p>
-            ) : null}
-            <p className="mt-0.5 flex items-center gap-1 pl-6 text-[11px] text-ink/45">
-              <Clock className="h-3 w-3" />
-              {new Date(order.created_at).toLocaleTimeString()}
-            </p>
-          </div>
-          <p className="shrink-0 text-sm text-teal">
-            {formatMoney(order.total)}
-          </p>
-        </div>
-        <ul className="mt-2 space-y-0.5 text-sm">
-          {(order.sale_order_lines || order.lines || []).map((l, i) => (
-            <li key={i}>
-              {l.quantity}× {l.name}
-            </li>
-          ))}
-        </ul>
-        {order.kitchen_note ? (
-          <p className="mt-2 text-xs text-ink/55">Note: {order.kitchen_note}</p>
-        ) : null}
+        <TicketFace ticket={ticket} />
         <button
           type="button"
           disabled={busy}
@@ -427,49 +519,71 @@ function DraggableOrderCard({
 }
 
 function OrderCardBody({
-  order,
+  ticket,
   dragging,
 }: {
-  order: CloudSaleOrder;
+  ticket: KitchenTicket;
   dragging?: boolean;
 }) {
   return (
     <div
       className={cn(
-        "rounded-2xl border border-ink/8 bg-stone/50 p-3 shadow-lg",
+        "rounded-2xl border bg-stone/50 p-3 shadow-lg",
         dragging && "border-teal/40 bg-white",
+        !dragging && ticket.addon && "border-gold/50",
       )}
     >
+      <TicketFace ticket={ticket} />
+    </div>
+  );
+}
+
+function TicketFace({ ticket }: { ticket: KitchenTicket }) {
+  const waited = waitMinutes(ticket.sentAt);
+  return (
+    <>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <GripVertical className="h-4 w-4 text-ink/35" />
-            <p className="truncate font-medium">{order.receipt_number}</p>
-          </div>
-          {order.place_label ? (
-            <p className="mt-0.5 pl-6 text-xs text-teal">
-              Place: {order.place_label}
+            <GripVertical className="h-4 w-4 shrink-0 text-ink/35" />
+            <p className="truncate font-display text-lg leading-tight">
+              {ticket.order.place_label || ticket.order.receipt_number}
             </p>
-          ) : null}
-          <p className="mt-0.5 flex items-center gap-1 pl-6 text-[11px] text-ink/45">
+          </div>
+          <p className="mt-0.5 pl-6 text-xs text-ink/50">
+            {ticket.order.receipt_number}
+            {ticket.addon ? " · same bill" : ""}
+          </p>
+          <p
+            className={cn(
+              "mt-1 flex items-center gap-1 pl-6 text-[11px]",
+              waited >= 15 ? "font-medium text-coral" : "text-ink/45",
+            )}
+          >
             <Clock className="h-3 w-3" />
-            {new Date(order.created_at).toLocaleTimeString()}
+            {waited === 0 ? "Just in" : `${waited} min`}
+            {" · "}
+            {ticket.addon ? `Add-on send ${ticket.round}` : "First send"}
           </p>
         </div>
-        <p className="shrink-0 text-sm text-teal">
-          {formatMoney(order.total)}
+        <p className="shrink-0 text-sm font-semibold text-teal">
+          {itemCount(ticket.lines)} items
         </p>
       </div>
-      <ul className="mt-2 space-y-0.5 text-sm">
-        {(order.sale_order_lines || order.lines || []).map((l, i) => (
-          <li key={i}>
-            {l.quantity}× {l.name}
+      <ul className="mt-3 space-y-1">
+        {ticket.lines.map((line, i) => (
+          <li key={i} className="flex items-baseline justify-between gap-2 text-sm">
+            <span className="font-medium">
+              {line.quantity}× {line.name}
+            </span>
           </li>
         ))}
       </ul>
-      {order.kitchen_note ? (
-        <p className="mt-2 text-xs text-ink/55">Note: {order.kitchen_note}</p>
+      {ticket.order.kitchen_note ? (
+        <p className="mt-2 rounded-xl bg-white/80 px-2.5 py-1.5 text-xs text-ink/70">
+          {ticket.order.kitchen_note}
+        </p>
       ) : null}
-    </div>
+    </>
   );
 }

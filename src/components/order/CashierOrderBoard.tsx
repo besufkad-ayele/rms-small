@@ -11,11 +11,14 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { AddToOrderPanel } from "@/components/order/AddToOrderPanel";
 import { ThermalReceipt } from "@/components/order/ThermalReceipt";
 import {
   isOrderPaid,
+  lineRound,
   listCloudOrders,
   markOrderPaid,
+  orderLines,
   requestCancelOrder,
   updateOrderStatus,
   type CloudSaleOrder,
@@ -60,6 +63,7 @@ export function CashierOrderBoard() {
   const [payMethods, setPayMethods] = useState<OrgPaymentMethod[]>(
     enabledPaymentMethods(DEFAULT_PAYMENT_METHODS),
   );
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     void getOrgPaymentMethods(orgId)
@@ -285,6 +289,11 @@ export function CashierOrderBoard() {
           </button>
         </div>
       </div>
+      {notice ? (
+        <p className="rounded-xl border border-teal/30 bg-teal/10 px-3 py-2 text-sm text-ink">
+          {notice}
+        </p>
+      ) : null}
       {error ? (
         <p className="rounded-xl bg-coral/15 px-3 py-2 text-sm text-coral">
           {error}
@@ -323,13 +332,20 @@ export function CashierOrderBoard() {
                 onPrint={() => startPrint(selected)}
                 onComplete={() => void markCompleted(selected)}
                 onCancel={() => void requestCancel(selected)}
+                orgId={orgId}
+                onAdded={async (message) => {
+                  setNotice(message);
+                  await reload();
+                }}
               />
             ) : null}
           </div>
 
           <ul className="order-2 max-h-[55vh] space-y-2 overflow-y-auto overscroll-contain lg:order-1 lg:max-h-[calc(100vh-11rem)]">
             {orders.map((order) => {
-              const lines = order.sale_order_lines || order.lines || [];
+              const lines = orderLines(order);
+              const qty = lines.reduce((sum, line) => sum + Number(line.quantity), 0);
+              const sends = new Set(lines.map((line) => lineRound(line))).size;
               const active = order.id === selectedId;
               const paid = isOrderPaid(order);
               return (
@@ -358,7 +374,8 @@ export function CashierOrderBoard() {
                           ) : null}
                         </p>
                         <p className="mt-0.5 text-[11px] text-ink/45">
-                          {lines.length} items ·{" "}
+                          {qty} items
+                          {sends > 1 ? ` · ${sends} kitchen sends` : ""} ·{" "}
                           {formatDateTime(order.created_at)}
                           {order.payment_proof_url ? " · proof" : ""}
                         </p>
@@ -408,6 +425,8 @@ function OrderDetailPanel({
   onPrint,
   onComplete,
   onCancel,
+  orgId,
+  onAdded,
 }: {
   order: CloudSaleOrder;
   busy: boolean;
@@ -423,8 +442,16 @@ function OrderDetailPanel({
   onPrint: () => void;
   onComplete: () => void;
   onCancel: () => void;
+  orgId: string;
+  onAdded: (message: string) => void;
 }) {
-  const lines = order.sale_order_lines || order.lines || [];
+  const lines = orderLines(order);
+  const grouped = new Map<number, typeof lines>();
+  for (const line of lines) {
+    const round = lineRound(line);
+    grouped.set(round, [...(grouped.get(round) || []), line]);
+  }
+  const groups = [...grouped.entries()].sort((a, b) => a[0] - b[0]);
   const paid = isOrderPaid(order);
   const showProof = Boolean(order.payment_proof_url) && (owner || cashierOps);
   const methodOptions =
@@ -517,18 +544,33 @@ function OrderDetailPanel({
         </div>
       ) : null}
 
-      <ul className="mt-3 max-h-40 space-y-1 overflow-auto text-sm lg:max-h-56">
-        {lines.map((l, i) => (
-          <li key={i} className="flex justify-between gap-2">
-            <span className="min-w-0 truncate">
-              {l.quantity}× {l.name}
-            </span>
-            <span className="shrink-0 tabular-nums text-ink/70">
-              {formatMoney(Number(l.line_total))}
-            </span>
-          </li>
+      <div className="mt-3 max-h-48 space-y-2 overflow-auto text-sm lg:max-h-64">
+        {groups.map(([round, group]) => (
+          <div key={round}>
+            {groups.length > 1 ? (
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink/45">
+                {round === 1 ? "First order" : `Added send ${round}`}
+              </p>
+            ) : null}
+            <ul className="space-y-1">
+              {group.map((line, i) => (
+                <li key={`${round}-${i}`} className="flex justify-between gap-2">
+                  <span className="min-w-0 truncate">
+                    {line.quantity}× {line.name}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-ink/70">
+                    {formatMoney(Number(line.line_total))}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         ))}
-      </ul>
+      </div>
+
+      {cashierOps ? (
+        <AddToOrderPanel orgId={orgId} order={order} onAdded={onAdded} />
+      ) : null}
 
       <div className="mt-3 space-y-1 border-t border-ink/8 pt-3 text-sm">
         <div className="flex justify-between text-ink/60">

@@ -5,6 +5,7 @@ import { CheckCircle2, Minus, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import { type CloudMenuItem } from "@/lib/cloud-catalog";
+import { appendOrderItems, listOpenOrders, type CloudSaleOrder } from "@/lib/cloud-sales";
 import {
   completeSaleResilient,
   loadMenuResilient,
@@ -29,16 +30,36 @@ export function OrderPOS({ onPlaced }: { onPlaced?: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [queuedNote, setQueuedNote] = useState<string | null>(null);
   const [placedNote, setPlacedNote] = useState<string | null>(null);
+  const [openOrders, setOpenOrders] = useState<CloudSaleOrder[]>([]);
 
   const reload = useCallback(async () => {
     setMenu(await loadMenuResilient(orgId, setMenu));
+  }, [orgId]);
+
+  const reloadOpen = useCallback(async () => {
+    try {
+      setOpenOrders(await listOpenOrders(orgId));
+    } catch {
+      setOpenOrders([]);
+    }
   }, [orgId]);
 
   useEffect(() => {
     void reload().catch((e) =>
       setError(e instanceof Error ? e.message : "Failed to load menu"),
     );
-  }, [reload]);
+    void reloadOpen();
+  }, [reload, reloadOpen]);
+
+  const matchingOrder = useMemo(() => {
+    const place = placeLabel.trim().toLowerCase();
+    if (!place) return null;
+    return (
+      openOrders.find(
+        (order) => (order.place_label || "").trim().toLowerCase() === place,
+      ) ?? null
+    );
+  }, [openOrders, placeLabel]);
 
   const available = menu.filter((m) => m.available);
   const filtered = useMemo(() => {
@@ -82,6 +103,24 @@ export function OrderPOS({ onPlaced }: { onPlaced?: () => void }) {
     setQueuedNote(null);
     setPlacedNote(null);
     try {
+      if (matchingOrder) {
+        const result = await appendOrderItems({
+          orgId,
+          orderId: matchingOrder.id,
+          lines: cart,
+          kitchenNote,
+        });
+        setCart([]);
+        setKitchenNote("");
+        const count = cart.reduce((sum, line) => sum + line.quantity, 0);
+        setPlacedNote(
+          `Added ${count} item${count === 1 ? "" : "s"} to ${result.order.receipt_number} (send ${result.round}). Same bill${result.order.place_label ? ` · ${result.order.place_label}` : ""}, now ${formatMoney(Number(result.order.total))}. Kitchen has only the new items.${result.reopenedPayment ? " Mark paid again for the new total." : ""}`,
+        );
+        await reloadOpen();
+        await reload();
+        window.setTimeout(() => onPlaced?.(), 600);
+        return;
+      }
       const { order, offlineQueued } = await completeSaleResilient({
         orgId,
         lines: cart,
@@ -104,6 +143,7 @@ export function OrderPOS({ onPlaced }: { onPlaced?: () => void }) {
       setPlacedNote(
         `${order.receipt_number} placed (unpaid)${order.place_label ? ` · ${order.place_label}` : ""}. Mark paid under Placed orders, then print.`,
       );
+      await reloadOpen();
       await reload();
       window.setTimeout(() => onPlaced?.(), 600);
     } catch (e) {
@@ -114,7 +154,7 @@ export function OrderPOS({ onPlaced }: { onPlaced?: () => void }) {
   }
 
   const cartPanel = (
-    <section className="flex max-h-[min(52vh,26rem)] flex-col overflow-hidden rounded-3xl border border-ink/8 bg-ink p-4 text-stone shadow-lg sm:p-5 lg:max-h-[calc(100vh-7rem)]">
+    <section className="flex max-h-[min(52vh,26rem)] flex-col overflow-hidden rounded-3xl border border-white/10 bg-shell p-4 text-shell-fg shadow-lg sm:p-5 lg:max-h-[calc(100vh-7rem)]">
       <h2 className="shrink-0 font-display text-xl text-gold">Current order</h2>
       <ul className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain">
         {cart.map((line) => (
@@ -134,7 +174,7 @@ export function OrderPOS({ onPlaced }: { onPlaced?: () => void }) {
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{line.menuItem.name}</p>
-              <p className="text-xs text-stone/60">
+              <p className="text-xs text-shell-fg/60">
                 {formatMoney(line.menuItem.price)}
               </p>
             </div>
@@ -165,7 +205,7 @@ export function OrderPOS({ onPlaced }: { onPlaced?: () => void }) {
           </li>
         ))}
         {cart.length === 0 ? (
-          <p className="py-4 text-center text-sm text-stone/50 lg:py-8">
+          <p className="py-4 text-center text-sm text-shell-fg/50 lg:py-8">
             Tap items to build the order
           </p>
         ) : null}
@@ -173,23 +213,25 @@ export function OrderPOS({ onPlaced }: { onPlaced?: () => void }) {
 
       <div className="mt-3 shrink-0 space-y-2.5 border-t border-white/10 pt-3 sm:space-y-3">
         <div className="flex justify-between text-sm">
-          <span className="text-stone/70">Subtotal</span>
+          <span className="text-shell-fg/70">Subtotal</span>
           <span>{formatMoney(subtotal)}</span>
         </div>
         <input
           value={placeLabel}
           onChange={(e) => setPlaceLabel(e.target.value)}
           placeholder="Table / place (e.g. T3, Patio)"
-          className="w-full rounded-xl border border-white/15 bg-ink px-3 py-2.5 text-sm outline-none"
+          className="w-full rounded-xl border border-white/15 bg-black/25 px-3 py-2.5 text-sm text-shell-fg outline-none placeholder:text-shell-fg/40"
         />
         <input
           value={kitchenNote}
           onChange={(e) => setKitchenNote(e.target.value)}
           placeholder="Kitchen note (optional)"
-          className="w-full rounded-xl border border-white/15 bg-ink px-3 py-2.5 text-sm outline-none"
+          className="w-full rounded-xl border border-white/15 bg-black/25 px-3 py-2.5 text-sm text-shell-fg outline-none placeholder:text-shell-fg/40"
         />
-        <p className="text-[11px] text-stone/50">
-          Order stays unpaid until you mark paid on Placed orders.
+        <p className="text-[11px] text-shell-fg/50">
+          {matchingOrder
+            ? `Adds onto ${matchingOrder.receipt_number}. One bill, a new kitchen send.`
+            : "Same table later? Use the same place name to add onto that bill."}
         </p>
         {error ? (
           <p className="rounded-xl bg-coral/20 px-3 py-2 text-sm text-coral">
@@ -203,7 +245,11 @@ export function OrderPOS({ onPlaced }: { onPlaced?: () => void }) {
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-teal px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
         >
           <CheckCircle2 className="h-4 w-4" />
-          {busy ? "Placing…" : "Place order"}
+          {busy
+            ? "Sending…"
+            : matchingOrder
+              ? `Add to ${matchingOrder.receipt_number}`
+              : "Place order"}
         </button>
       </div>
     </section>

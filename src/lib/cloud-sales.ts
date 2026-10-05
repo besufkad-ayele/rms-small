@@ -112,20 +112,218 @@ export interface CloudSaleOrder {
   cancel_requested_by?: string | null;
   cancel_requested_at?: string | null;
   created_at: string;
-  lines?: {
-    name: string;
-    unit_price: number;
-    quantity: number;
-    line_total: number;
-    menu_item_id: string | null;
-  }[];
-  sale_order_lines?: {
-    name: string;
-    unit_price: number;
-    quantity: number;
-    line_total: number;
-    menu_item_id: string | null;
-  }[];
+  lines?: CloudSaleLine[];
+  sale_order_lines?: CloudSaleLine[];
+}
+
+export type KitchenLineStatus = "placed" | "preparing" | "ready" | "served";
+
+export interface CloudSaleLine {
+  id?: string;
+  name: string;
+  unit_price: number;
+  quantity: number;
+  line_total: number;
+  menu_item_id: string | null;
+  /** 1 = first send. Later adds stay on the same bill as a new round. */
+  round?: number | null;
+  kitchen_status?: KitchenLineStatus | null;
+  sent_at?: string | null;
+}
+
+export function orderLines(order: {
+  lines?: CloudSaleLine[] | null;
+  sale_order_lines?: CloudSaleLine[] | null;
+}): CloudSaleLine[] {
+  return order.sale_order_lines || order.lines || [];
+}
+
+export function lineRound(line: CloudSaleLine): number {
+  const n = Number(line.round);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+export function lineKitchenStatus(
+  line: CloudSaleLine,
+  fallback: SaleOrderStatus,
+): KitchenLineStatus {
+  const s = line.kitchen_status;
+  if (s === "placed" || s === "preparing" || s === "ready" || s === "served") {
+    return s;
+  }
+  if (fallback === "completed" || fallback === "canceled") return "served";
+  if (fallback === "preparing" || fallback === "ready") return fallback;
+  return "placed";
+}
+
+/** Earliest open send wins, so a new round pulls the check back to the kitchen queue. */
+export function deriveOrderStatus(
+  lines: CloudSaleLine[],
+  fallback: SaleOrderStatus = "placed",
+): Exclude<SaleOrderStatus, "canceled"> {
+  if (lines.length === 0) {
+    return fallback === "canceled" || fallback === "completed" ? "placed" : fallback;
+  }
+  const statuses = lines.map((l) => lineKitchenStatus(l, fallback));
+  if (statuses.every((s) => s === "served")) return "completed";
+  if (statuses.some((s) => s === "placed")) return "placed";
+  if (statuses.some((s) => s === "preparing")) return "preparing";
+  return "ready";
+}
+
+async function insertSaleOrderLines(rows: Record<string, unknown>[]) {
+  const supabase = createClient();
+  let payload = rows.map((row) => ({ ...row }));
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { error } = await supabase.from("sale_order_lines").insert(payload);
+    if (!error) return;
+    const missing = missingColumnFromError(error.message);
+    if (!missing || !payload.some((row) => missing in row)) {
+      throw new Error(error.message);
+    }
+    payload = payload.map((row) => {
+      const next = { ...row };
+      delete next[missing];
+      return next;
+    });
+  }
+  throw new Error("Could not add items");
+}
+
+/**
+ * Add dishes to an open check. Same receipt and total for finance.
+ * The new dishes are a later kitchen round so the pass sees only what just came in.
+ */
+export async function appendOrderItems(input: {
+  orgId: string;
+  orderId: string;
+  lines: { menuItem: CloudMenuItem; quantity: number }[];
+  kitchenNote?: string;
+}): Promise<{ order: CloudSaleOrder; round: number; reopenedPayment: boolean }> {
+  if (input.lines.length === 0) throw new Error("Nothing to add.");
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("sale_orders")
+    .select("*, sale_order_lines(*)")
+    .eq("id", input.orderId)
+    .eq("organization_id", input.orgId)
+    .single();
+  if (error || !data) throw new Error(error?.message || "Order not found");
+  const current = mapOrder(data as Record<string, unknown>);
+  if (current.status === "canceled" || current.status === "completed") {
+    throw new Error("This check is already closed.");
+  }
+
+  const existing = orderLines(current);
+  const round =
+    existing.length === 0
+      ? 1
+      : Math.max(...existing.map((line) => lineRound(line))) + 1;
+  const now = new Date().toISOString();
+  const added = input.lines.map(({ menuItem, quantity }) => ({
+    order_id: current.id,
+    menu_item_id: menuItem.id,
+    name: menuItem.name,
+    unit_price: menuItem.price,
+    quantity,
+    line_total: Math.round(menuItem.price * quantity * 100) / 100,
+    round,
+    kitchen_status: "placed",
+    sent_at: now,
+  }));
+  await insertSaleOrderLines(added);
+
+  for (const line of input.lines) {
+    await supabase
+      .from("menu_items")
+      .update({
+        vote_count: (line.menuItem.vote_count || 0) + line.quantity,
+        updated_at: now,
+      })
+      .eq("id", line.menuItem.id);
+  }
+  await applyRecipeDelta(input.lines, -1);
+
+  const allLines = [
+    ...existing,
+    ...added.map((line) => ({
+      name: line.name,
+      unit_price: line.unit_price,
+      quantity: line.quantity,
+      line_total: line.line_total,
+      menu_item_id: line.menu_item_id,
+      round,
+      kitchen_status: "placed" as const,
+      sent_at: now,
+    })),
+  ];
+  const subtotal = allLines.reduce((s, line) => s + Number(line.line_total), 0);
+  const bill = computeBill(subtotal, {
+    vatPercent: Number(current.vat_percent ?? 15),
+    servicePercent: Number(current.service_percent ?? 10),
+  });
+  const wasPaid = isOrderPaid(current);
+  const note = input.kitchenNote?.trim();
+  const kitchenNote = note
+    ? [current.kitchen_note, `Send ${round}: ${note}`].filter(Boolean).join(" · ")
+    : current.kitchen_note;
+
+  const updated = await updateSaleOrderRow(input.orgId, current.id, {
+    subtotal: bill.subtotal,
+    service_charge: bill.serviceCharge,
+    vat: bill.vat,
+    total: bill.total,
+    vat_percent: bill.vatPercent,
+    service_percent: bill.servicePercent,
+    status: "placed",
+    kitchen_note: kitchenNote,
+    ...(wasPaid
+      ? { payment_status: "unpaid", paid_at: null, paid_by: null }
+      : {}),
+  });
+  return { order: mapOrder(updated), round, reopenedPayment: wasPaid };
+}
+
+/** Move one kitchen send. Earlier sends on the same bill stay where they are. */
+export async function updateKitchenRound(
+  orgId: string,
+  orderId: string,
+  round: number,
+  status: KitchenLineStatus,
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("sale_orders")
+    .select("*, sale_order_lines(*)")
+    .eq("id", orderId)
+    .eq("organization_id", orgId)
+    .neq("status", "canceled")
+    .single();
+  if (error || !data) throw new Error(error?.message || "Order not found");
+  const current = mapOrder(data as Record<string, unknown>);
+  const { error: lineError } = await supabase
+    .from("sale_order_lines")
+    .update({ kitchen_status: status })
+    .eq("order_id", orderId)
+    .eq("round", round);
+  if (lineError) {
+    const missing = missingColumnFromError(lineError.message);
+    if (missing) {
+      await updateOrderStatus(
+        orgId,
+        orderId,
+        status === "served" ? "completed" : status,
+      );
+      return;
+    }
+    throw new Error(lineError.message);
+  }
+  const nextLines = orderLines(current).map((line) =>
+    lineRound(line) === round ? { ...line, kitchen_status: status } : line,
+  );
+  await updateSaleOrderRow(orgId, orderId, {
+    status: deriveOrderStatus(nextLines, current.status),
+  });
 }
 
 /** Treat missing payment_status (pre-migration rows) as paid. */
@@ -351,6 +549,11 @@ export async function updateOrderStatus(
     .select("*, sale_order_lines(*)")
     .single();
   if (error) throw new Error(error.message);
+  const kitchen = status === "completed" ? "served" : status;
+  await supabase
+    .from("sale_order_lines")
+    .update({ kitchen_status: kitchen })
+    .eq("order_id", orderId);
   return mapOrder(data as Record<string, unknown>);
 }
 

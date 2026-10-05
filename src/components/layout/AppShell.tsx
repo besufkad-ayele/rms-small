@@ -321,15 +321,7 @@ export function AppShell({
           </div>
         </header>
 
-        <main
-          className={cn(
-            "w-full flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-8",
-            (pathname.startsWith("/app/order") ||
-              pathname.startsWith("/app/reports") ||
-              pathname.startsWith("/app/inventory")) &&
-              "light-surface bg-stone text-ink",
-          )}
-        >
+        <main className="w-full flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
           {children}
         </main>
       </div>

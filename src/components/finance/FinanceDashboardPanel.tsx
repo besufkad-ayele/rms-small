@@ -303,7 +303,7 @@ export function FinanceDashboardPanel() {
               className={cn(
                 "rounded-full px-3 py-1.5 text-xs font-medium",
                 usingCustom || customOpen
-                  ? "bg-ink text-stone"
+                  ? "bg-shell text-shell-fg"
                   : "bg-ink/5 text-ink/70",
               )}
             >
@@ -369,11 +369,11 @@ export function FinanceDashboardPanel() {
       {tab === "daily" ? <DailySalesPanel /> : null}
 
       {tab === "overall" ? (
-        <section className="rounded-3xl border border-ink/8 bg-gradient-to-br from-ink via-ink to-teal/80 p-5 text-stone shadow-xl sm:p-6">
+        <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-shell via-shell to-teal/80 p-5 text-shell-fg shadow-xl sm:p-6">
           <h2 className="font-display text-2xl text-gold sm:text-3xl">
             Overall dashboard
           </h2>
-          <p className="mt-1 text-sm text-stone/70">
+          <p className="mt-1 text-sm text-shell-fg/70">
             Money in the system for {rangeText} — sales in, bills out, profit
             left
           </p>
@@ -413,19 +413,24 @@ export function FinanceDashboardPanel() {
                 />
               </div>
 
-              <div className="mt-4 rounded-2xl bg-white/10 px-4 py-3 backdrop-blur">
-                <p className="text-[11px] text-stone/55">Trend</p>
+              <div className="mt-4 rounded-2xl bg-paper px-4 py-3 text-ink">
+                <p className="text-[11px] font-medium text-ink/55">
+                  Daily money in, money out, and what’s left
+                </p>
                 <SparkLines
                   labels={chartSeries.labels}
                   series={chartSeries.series}
-                  height={140}
-                  className="mt-2 text-stone"
+                  details={(dash?.series ?? []).map((p) => ({
+                    orders: p.orders,
+                  }))}
+                  height={200}
+                  className="mt-2"
                 />
               </div>
 
               <div className="mt-4 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl bg-white/10 px-4 py-3 backdrop-blur">
-                  <p className="text-[11px] text-stone/55">Net profit</p>
+                  <p className="text-[11px] text-shell-fg/55">Net profit</p>
                   <p
                     className={cn(
                       "mt-1 font-display text-2xl",
@@ -434,21 +439,21 @@ export function FinanceDashboardPanel() {
                   >
                     {formatMoney(netProfit)}
                   </p>
-                  <p className="mt-1 text-xs text-stone/50">
+                  <p className="mt-1 text-xs text-shell-fg/50">
                     Gross profit − spend
                   </p>
                 </div>
                 <div className="rounded-2xl bg-white/10 px-4 py-3 backdrop-blur">
-                  <p className="text-[11px] text-stone/55">Gross margin</p>
+                  <p className="text-[11px] text-shell-fg/55">Gross margin</p>
                   <p className="mt-1 font-display text-2xl">
                     {dash?.grossMarginPct ?? 0}%
                   </p>
-                  <p className="mt-1 text-xs text-stone/50">
+                  <p className="mt-1 text-xs text-shell-fg/50">
                     {dash?.orderCount ?? 0} orders · {dash?.itemsSold ?? 0} items
                   </p>
                 </div>
                 <div className="rounded-2xl bg-white/10 px-4 py-3 backdrop-blur">
-                  <p className="text-[11px] text-stone/55">Revenue growth</p>
+                  <p className="text-[11px] text-shell-fg/55">Revenue growth</p>
                   <p
                     className={cn(
                       "mt-1 font-display text-2xl",
@@ -461,7 +466,7 @@ export function FinanceDashboardPanel() {
                       ? `${dash.revenueGrowthPct >= 0 ? "+" : ""}${dash.revenueGrowthPct}%`
                       : "—"}
                   </p>
-                  <p className="mt-1 text-xs text-stone/50">
+                  <p className="mt-1 text-xs text-shell-fg/50">
                     Prior: {formatMoney(dash?.priorRevenue ?? 0)}
                   </p>
                 </div>
@@ -469,30 +474,30 @@ export function FinanceDashboardPanel() {
 
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl bg-white/5 px-4 py-3">
-                  <p className="text-xs font-medium uppercase tracking-wide text-stone/50">
+                  <p className="text-xs font-medium uppercase tracking-wide text-shell-fg/50">
                     How it adds up
                   </p>
                   <ul className="mt-2 space-y-1.5 text-sm">
                     <li className="flex justify-between gap-2">
-                      <span className="text-stone/70">Sales in</span>
+                      <span className="text-shell-fg/70">Sales in</span>
                       <span className="font-medium">{formatMoney(revenue)}</span>
                     </li>
                     <li className="flex justify-between gap-2">
-                      <span className="text-stone/70">− Food cost (COGS)</span>
+                      <span className="text-shell-fg/70">− Food cost (COGS)</span>
                       <span>{formatMoney(cogs)}</span>
                     </li>
                     <li className="flex justify-between gap-2 border-t border-white/10 pt-1.5">
-                      <span className="text-stone/70">= Gross profit</span>
+                      <span className="text-shell-fg/70">= Gross profit</span>
                       <span className="font-medium text-gold">
                         {formatMoney(grossProfit)}
                       </span>
                     </li>
                     <li className="flex justify-between gap-2">
-                      <span className="text-stone/70">− Bills spent</span>
+                      <span className="text-shell-fg/70">− Bills spent</span>
                       <span>{formatMoney(spent)}</span>
                     </li>
                     <li className="flex justify-between gap-2 border-t border-white/10 pt-1.5">
-                      <span className="font-medium text-stone">= Net profit</span>
+                      <span className="font-medium text-shell-fg">= Net profit</span>
                       <span
                         className={cn(
                           "font-display text-lg",
@@ -505,20 +510,20 @@ export function FinanceDashboardPanel() {
                   </ul>
                 </div>
                 <div className="rounded-2xl bg-white/5 px-4 py-3">
-                  <p className="text-xs font-medium uppercase tracking-wide text-stone/50">
+                  <p className="text-xs font-medium uppercase tracking-wide text-shell-fg/50">
                     Cash flow
                   </p>
                   <ul className="mt-2 space-y-1.5 text-sm">
                     <li className="flex justify-between gap-2">
-                      <span className="text-stone/70">What we got</span>
+                      <span className="text-shell-fg/70">What we got</span>
                       <span className="font-medium">{formatMoney(revenue)}</span>
                     </li>
                     <li className="flex justify-between gap-2">
-                      <span className="text-stone/70">What we spent</span>
+                      <span className="text-shell-fg/70">What we spent</span>
                       <span>{formatMoney(spent)}</span>
                     </li>
                     <li className="flex justify-between gap-2 border-t border-white/10 pt-1.5">
-                      <span className="font-medium text-stone">Net in system</span>
+                      <span className="font-medium text-shell-fg">Net in system</span>
                       <span
                         className={cn(
                           "font-display text-lg",
@@ -587,12 +592,30 @@ export function FinanceDashboardPanel() {
                   Prior revenue {formatMoney(dash?.priorRevenue ?? 0)}
                 </p>
               </div>
-              <div className="rounded-2xl bg-stone/40 px-3 py-3">
-                <p className="mb-1 text-[11px] text-ink/55">Trend</p>
+              <div className="rounded-2xl bg-stone/60 px-3 py-3">
+                <p className="text-[11px] text-ink/55">Average check</p>
+                <p className="mt-1 font-display text-lg sm:text-xl">
+                  {formatMoney(
+                    (dash?.orderCount ?? 0) > 0
+                      ? revenue / (dash?.orderCount ?? 1)
+                      : 0,
+                  )}
+                </p>
+                <p className="mt-1 text-xs text-ink/45">
+                  Per paid order in this range
+                </p>
+              </div>
+              <div className="rounded-2xl bg-stone/40 px-3 py-3 sm:col-span-2">
+                <p className="mb-1 text-[11px] text-ink/55">
+                  Daily money in, money out, and what’s left
+                </p>
                 <SparkLines
                   labels={chartSeries.labels}
                   series={chartSeries.series}
-                  height={120}
+                  details={(dash?.series ?? []).map((p) => ({
+                    orders: p.orders,
+                  }))}
+                  height={200}
                 />
               </div>
             </div>
@@ -639,7 +662,7 @@ export function FinanceDashboardPanel() {
                       className={cn(
                         "rounded-full px-3 py-1.5 text-xs font-medium",
                         payKind === f.id
-                          ? "bg-ink text-stone"
+                          ? "bg-shell text-shell-fg"
                           : "bg-stone text-ink/65",
                       )}
                     >
@@ -816,11 +839,11 @@ export function FinanceDashboardPanel() {
 
       {tab === "spend" ? (
         <>
-          <section className="rounded-3xl border border-ink/8 bg-gradient-to-br from-ink via-ink to-coral/70 p-4 text-stone shadow-lg sm:p-5">
+          <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-shell via-shell to-coral/70 p-4 text-shell-fg shadow-lg sm:p-5">
             <h2 className="font-display text-xl sm:text-2xl text-gold">
               Spend dashboard
             </h2>
-            <p className="mt-1 text-sm text-stone/70">
+            <p className="mt-1 text-sm text-shell-fg/70">
               What went out in {spend?.rangeLabel ?? rangeText}
             </p>
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -842,7 +865,7 @@ export function FinanceDashboardPanel() {
               />
             </div>
             {spend && spend.priorPeriodSpent > 0 ? (
-              <p className="mt-3 text-xs text-stone/55">
+              <p className="mt-3 text-xs text-shell-fg/55">
                 Prior period spent {formatMoney(spend.priorPeriodSpent)}
               </p>
             ) : null}
@@ -855,7 +878,7 @@ export function FinanceDashboardPanel() {
                   >
                     <div className="min-w-0">
                       <p className="truncate font-medium">{b.title}</p>
-                      <p className="text-xs text-stone/55">
+                      <p className="text-xs text-shell-fg/55">
                         {b.category} · {String(b.paid_at).slice(0, 10)}
                       </p>
                     </div>
@@ -866,7 +889,7 @@ export function FinanceDashboardPanel() {
                 ))}
               </ul>
             ) : (
-              <p className="mt-4 text-sm text-stone/55">
+              <p className="mt-4 text-sm text-shell-fg/55">
                 No paid bills in this period — add them below.
               </p>
             )}
@@ -910,18 +933,18 @@ function OverallStat({
         emphasize && "ring-1 ring-gold/40",
       )}
     >
-      <p className="text-[11px] text-stone/55">{label}</p>
+      <p className="text-[11px] text-shell-fg/55">{label}</p>
       <p
         className={cn(
           "mt-1 font-display text-xl sm:text-2xl",
           tone === "good" && "text-gold",
           tone === "bad" && "text-coral",
-          tone === "out" && "text-stone/90",
+          tone === "out" && "text-shell-fg/90",
         )}
       >
         {value}
       </p>
-      {hint ? <p className="mt-1 text-xs text-stone/45">{hint}</p> : null}
+      {hint ? <p className="mt-1 text-xs text-shell-fg/45">{hint}</p> : null}
     </div>
   );
 }
@@ -942,8 +965,8 @@ function StatDark({
         className,
       )}
     >
-      <p className="text-[11px] text-stone/60">{label}</p>
-      <p className="mt-1 font-display text-lg text-stone sm:text-xl">{value}</p>
+      <p className="text-[11px] text-shell-fg/60">{label}</p>
+      <p className="mt-1 font-display text-lg text-shell-fg sm:text-xl">{value}</p>
     </div>
   );
 }

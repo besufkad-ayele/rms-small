@@ -164,13 +164,13 @@ export function DailySalesPanel() {
 
   return (
     <div className="space-y-4">
-      <section className="rounded-3xl border border-ink/8 bg-gradient-to-br from-ink via-ink to-teal/75 p-4 text-stone shadow-lg sm:p-5">
+      <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-shell via-shell to-teal/75 p-4 text-shell-fg shadow-lg sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="font-display text-2xl text-gold sm:text-3xl">
               Daily sales point
             </h2>
-            <p className="mt-1 text-sm text-stone/65">
+            <p className="mt-1 text-sm text-shell-fg/65">
               {today} — enter money at hand on X anytime; Z closes the day.
             </p>
           </div>
@@ -743,10 +743,10 @@ function CompareView({ point }: { point: DailySalesPoint }) {
         </div>
 
         {z ? (
-          <div className="mt-4 rounded-2xl bg-ink px-4 py-3 text-stone">
+          <div className="mt-4 rounded-2xl bg-black/25 px-4 py-3 text-shell-fg">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
-                <p className="text-[11px] text-stone/55">Drawer vs system (Z)</p>
+                <p className="text-[11px] text-shell-fg/55">Drawer vs system (Z)</p>
                 <p
                   className={cn(
                     "mt-1 font-display text-2xl",
@@ -758,7 +758,7 @@ function CompareView({ point }: { point: DailySalesPoint }) {
               </div>
               {driftSinceClose != null && driftSinceClose !== 0 ? (
                 <div className="text-right">
-                  <p className="text-[11px] text-stone/55">
+                  <p className="text-[11px] text-shell-fg/55">
                     Sales since Z was saved
                   </p>
                   <p className="mt-1 font-display text-lg text-gold">
@@ -834,7 +834,7 @@ function MiniStat({
 }) {
   return (
     <div className="rounded-2xl bg-white/10 px-3 py-2.5 backdrop-blur">
-      <p className="text-[11px] text-stone/55">{label}</p>
+      <p className="text-[11px] text-shell-fg/55">{label}</p>
       <p
         className={cn(
           "mt-1 font-display text-lg",

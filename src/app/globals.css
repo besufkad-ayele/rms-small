@@ -76,35 +76,8 @@ html.dark :where(.bg-paper, .bg-paper\/90, .bg-paper\/80) {
   color: var(--ink);
 }
 
-html.dark :where(.bg-stone\/40, .bg-stone\/50, .bg-stone\/60) {
+html.dark :where(.bg-stone\/40, .bg-stone\/50, .bg-stone\/60, .bg-stone\/70) {
   background-color: color-mix(in oklab, var(--paper) 85%, white 4%) !important;
-}
-
-/*
-  Order, finance, and inventory keep the light palette so counters stay
-  readable. Tokens inherit, so bg-ink / text-stone resolve like light mode.
-*/
-.light-surface {
-  --ink: #0b1d1a;
-  --stone: #eef2f0;
-  --teal: #2a9d8f;
-  --gold: #e9c46a;
-  --coral: #e76f51;
-  --paper: #ffffff;
-  color: var(--ink);
-  color-scheme: light;
-}
-
-html.dark .light-surface :where(.bg-stone\/40) {
-  background-color: color-mix(in oklab, var(--stone) 40%, transparent) !important;
-}
-
-html.dark .light-surface :where(.bg-stone\/50) {
-  background-color: color-mix(in oklab, var(--stone) 50%, transparent) !important;
-}
-
-html.dark .light-surface :where(.bg-stone\/60) {
-  background-color: color-mix(in oklab, var(--stone) 60%, transparent) !important;
 }
 
 @media print {

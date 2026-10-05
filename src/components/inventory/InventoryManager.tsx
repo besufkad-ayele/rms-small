@@ -208,7 +208,7 @@ export function InventoryManager() {
 
   return (
     <div className="space-y-4">
-      <section className="rounded-3xl border border-ink/8 bg-gradient-to-br from-ink via-ink to-teal/85 p-4 text-stone shadow-lg sm:p-5">
+      <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-shell via-shell to-teal/85 p-4 text-shell-fg shadow-lg sm:p-5">
         <div className="flex items-start gap-3">
           <span className="rounded-2xl bg-white/10 p-2.5">
             <Package className="h-5 w-5 text-gold" />
@@ -217,7 +217,7 @@ export function InventoryManager() {
             <h2 className="font-display text-xl sm:text-2xl text-gold">
               Inventory dashboard
             </h2>
-            <p className="mt-1 text-sm text-stone/70">
+            <p className="mt-1 text-sm text-shell-fg/70">
               {dash.itemCount === 0
                 ? "Stock value, alerts, and items at a glance"
                 : `${dash.healthyCount} of ${dash.itemCount} above the alert level · ${formatMoney(dash.stockValue)} on hand`}
@@ -277,7 +277,7 @@ export function InventoryManager() {
                 />
               ) : null}
             </div>
-            <p className="mt-1.5 text-[11px] text-stone/55">
+            <p className="mt-1.5 text-[11px] text-shell-fg/55">
               Teal healthy · gold low · coral out
               {dash.expiredCount > 0
                 ? ` · ${dash.expiredCount} already expired`
@@ -659,7 +659,7 @@ function DashStat({
         className,
       )}
     >
-      <p className="text-[11px] text-stone/60">{label}</p>
+      <p className="text-[11px] text-shell-fg/60">{label}</p>
       <p className="mt-1 flex items-center gap-1.5 font-display text-xl sm:text-2xl">
         {alert ? <AlertTriangle className="h-4 w-4 text-coral" /> : null}
         {value}
