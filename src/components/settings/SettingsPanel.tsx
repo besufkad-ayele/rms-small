@@ -77,16 +77,11 @@ export function SettingsPanel() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="font-display text-2xl text-ink sm:text-3xl">
-          Settings{owner ? " & Billing" : ""}
-        </h2>
-        <p className="mt-1 text-sm text-ink/60">
-          {owner
-            ? "Theme, profile, payment methods, business details, and subscription."
-            : "Your profile and password — ask your owner for payment or billing changes."}
-        </p>
-      </div>
+      <p className="text-sm text-ink/60">
+        {owner
+          ? "Theme, profile, payment methods, business details, and subscription."
+          : "Your profile and password — ask your owner for payment or billing changes."}
+      </p>
 
       <SegmentedTabs tabs={tabs} value={tab} onChange={setTab} />
 

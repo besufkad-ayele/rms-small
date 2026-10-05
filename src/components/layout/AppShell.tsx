@@ -65,8 +65,16 @@ export function AppShell({
   const { connection, pendingCount } = useOfflineSync();
   const isOffline = connection.status === "down";
   const [open, setOpen] = useState(false);
-  const heading = titleForPath(pathname, title);
   const owner = tenant ? isOwner(tenant.membership) : false;
+  const onSettings =
+    pathname.startsWith("/app/settings") || pathname.startsWith("/app/billing");
+  const heading = title
+    ? title
+    : onSettings
+      ? owner
+        ? "Settings & Billing"
+        : "Settings"
+      : titleForPath(pathname);
 
   const nav = [
     { href: "/app", label: "Home", icon: LayoutGrid, exact: true },
