@@ -69,12 +69,42 @@ export async function listInventoryChangedSince(
   return items.map((i) => ({ ...i, cost_history: byId.get(i.id) || [] }));
 }
 
+export type InventoryStockRow = {
+  id: string;
+  name: string;
+  stock_qty: number;
+  unit: string;
+  value: number;
+};
+
+export type InventoryExpiryRow = InventoryStockRow & {
+  expiry_date: string;
+  daysLeft: number;
+};
+
 export type InventoryDashboard = {
   itemCount: number;
   lowStockCount: number;
+  outCount: number;
+  healthyCount: number;
+  expiringCount: number;
+  expiredCount: number;
   stockValue: number;
   lowStock: { id: string; name: string; stock_qty: number; unit: string }[];
+  expiring: InventoryExpiryRow[];
+  expired: InventoryExpiryRow[];
+  topValue: InventoryStockRow[];
 };
+
+const EXPIRING_WINDOW_DAYS = 14;
+
+function daysUntilDate(iso: string, today = new Date()): number | null {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return null;
+  const target = new Date(y, m - 1, d);
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return Math.round((target.getTime() - start.getTime()) / 86_400_000);
+}
 
 export function summarizeInventory(
   items: CloudInventoryItem[],
@@ -82,13 +112,54 @@ export function summarizeInventory(
   const lowStock = items.filter(
     (i) => Number(i.stock_qty) <= Number(i.low_stock_threshold),
   );
+  const out = items.filter((i) => Number(i.stock_qty) <= 0);
   const stockValue = items.reduce(
     (s, i) => s + Number(i.stock_qty) * Number(i.cost_per_unit),
     0,
   );
+  const dated = items.flatMap((i) => {
+    if (!i.expiry_date) return [];
+    const daysLeft = daysUntilDate(i.expiry_date);
+    if (daysLeft == null) return [];
+    return [
+      {
+        id: i.id,
+        name: i.name,
+        stock_qty: Number(i.stock_qty),
+        unit: i.unit,
+        value:
+          Math.round(Number(i.stock_qty) * Number(i.cost_per_unit) * 100) / 100,
+        expiry_date: i.expiry_date.slice(0, 10),
+        daysLeft,
+      },
+    ];
+  });
+  const expiring = dated
+    .filter((i) => i.daysLeft >= 0 && i.daysLeft <= EXPIRING_WINDOW_DAYS)
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+  const expired = dated
+    .filter((i) => i.daysLeft < 0)
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+  const topValue = [...items]
+    .map((i) => ({
+      id: i.id,
+      name: i.name,
+      stock_qty: Number(i.stock_qty),
+      unit: i.unit,
+      value:
+        Math.round(Number(i.stock_qty) * Number(i.cost_per_unit) * 100) / 100,
+    }))
+    .filter((i) => i.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 4);
+
   return {
     itemCount: items.length,
     lowStockCount: lowStock.length,
+    outCount: out.length,
+    healthyCount: items.length - lowStock.length,
+    expiringCount: expiring.length,
+    expiredCount: expired.length,
     stockValue: Math.round(stockValue * 100) / 100,
     lowStock: lowStock.slice(0, 5).map((i) => ({
       id: i.id,
@@ -96,6 +167,9 @@ export function summarizeInventory(
       stock_qty: Number(i.stock_qty),
       unit: i.unit,
     })),
+    expiring: expiring.slice(0, 5),
+    expired: expired.slice(0, 5),
+    topValue,
   };
 }
 

@@ -69,6 +69,51 @@ export function InventoryManager() {
   }, [reload]);
 
   const dash = useMemo(() => summarizeInventory(items), [items]);
+  const attention = useMemo(() => {
+    const rows: {
+      id: string;
+      title: string;
+      detail: string;
+      tone: "bad" | "warn";
+    }[] = [];
+    const seen = new Set<string>();
+    for (const item of dash.expired) {
+      seen.add(item.id);
+      rows.push({
+        id: item.id,
+        title: item.name,
+        detail: `${item.stock_qty} ${item.unit} · expired ${item.expiry_date}`,
+        tone: "bad",
+      });
+    }
+    for (const item of dash.expiring) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      rows.push({
+        id: item.id,
+        title: item.name,
+        detail: `${item.stock_qty} ${item.unit} · ${
+          item.daysLeft === 0
+            ? "expires today"
+            : `expires in ${item.daysLeft} day${item.daysLeft === 1 ? "" : "s"}`
+        }`,
+        tone: "warn",
+      });
+    }
+    for (const item of dash.lowStock) {
+      if (seen.has(item.id)) continue;
+      rows.push({
+        id: item.id,
+        title: item.name,
+        detail:
+          item.stock_qty <= 0
+            ? `Out of stock · 0 ${item.unit}`
+            : `Low · ${item.stock_qty} ${item.unit} left`,
+        tone: item.stock_qty <= 0 ? "bad" : "warn",
+      });
+    }
+    return rows;
+  }, [dash]);
   const grouped = useMemo(() => groupUnitsByKind(units), [units]);
 
   function startEdit(item: CloudInventoryItem) {
@@ -173,51 +218,72 @@ export function InventoryManager() {
               Inventory dashboard
             </h2>
             <p className="mt-1 text-sm text-stone/70">
-              Stock value, alerts, and items at a glance
+              {dash.itemCount === 0
+                ? "Stock value, alerts, and items at a glance"
+                : `${dash.healthyCount} of ${dash.itemCount} above the alert level · ${formatMoney(dash.stockValue)} on hand`}
             </p>
           </div>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <div className="rounded-2xl bg-white/10 px-3 py-3 backdrop-blur">
-            <p className="text-[11px] text-stone/60">Items</p>
-            <p className="mt-1 font-display text-xl sm:text-2xl">
-              {dash.itemCount}
-            </p>
-          </div>
-          <div className="rounded-2xl bg-white/10 px-3 py-3 backdrop-blur">
-            <p className="text-[11px] text-stone/60">Stock value</p>
-            <p className="mt-1 font-display text-xl sm:text-2xl">
-              {formatMoney(dash.stockValue)}
-            </p>
-          </div>
-          <div
-            className={cn(
-              "rounded-2xl px-3 py-3 backdrop-blur col-span-2 sm:col-span-1",
-              dash.lowStockCount > 0
-                ? "bg-coral/25 ring-1 ring-coral/40"
-                : "bg-white/10",
-            )}
-          >
-            <p className="text-[11px] text-stone/60">Low stock</p>
-            <p className="mt-1 flex items-center gap-1.5 font-display text-xl sm:text-2xl">
-              {dash.lowStockCount > 0 ? (
-                <AlertTriangle className="h-4 w-4 text-coral" />
-              ) : null}
-              {dash.lowStockCount}
-            </p>
-          </div>
+          <DashStat label="Items" value={String(dash.itemCount)} />
+          <DashStat label="Stock value" value={formatMoney(dash.stockValue)} />
+          <DashStat
+            label="Healthy"
+            value={String(dash.healthyCount)}
+            className="col-span-2 sm:col-span-1"
+          />
+          <DashStat
+            label="Low stock"
+            value={String(dash.lowStockCount)}
+            alert={dash.lowStockCount > 0}
+          />
+          <DashStat
+            label="Out of stock"
+            value={String(dash.outCount)}
+            alert={dash.outCount > 0}
+          />
+          <DashStat
+            label="Expiring in 14 days"
+            value={String(dash.expiringCount)}
+            alert={dash.expiringCount > 0}
+            className="col-span-2 sm:col-span-1"
+          />
         </div>
-        {dash.lowStock.length > 0 ? (
-          <ul className="mt-3 flex flex-wrap gap-2">
-            {dash.lowStock.map((i) => (
-              <li
-                key={i.id}
-                className="rounded-full bg-coral/20 px-3 py-1 text-xs text-stone"
-              >
-                {i.name}: {i.stock_qty} {i.unit}
-              </li>
-            ))}
-          </ul>
+        {dash.itemCount > 0 ? (
+          <div className="mt-3">
+            <div className="flex h-2 overflow-hidden rounded-full bg-white/10">
+              {dash.healthyCount > 0 ? (
+                <span
+                  className="bg-teal"
+                  style={{
+                    width: `${(dash.healthyCount / dash.itemCount) * 100}%`,
+                  }}
+                />
+              ) : null}
+              {dash.lowStockCount - dash.outCount > 0 ? (
+                <span
+                  className="bg-gold"
+                  style={{
+                    width: `${((dash.lowStockCount - dash.outCount) / dash.itemCount) * 100}%`,
+                  }}
+                />
+              ) : null}
+              {dash.outCount > 0 ? (
+                <span
+                  className="bg-coral"
+                  style={{
+                    width: `${(dash.outCount / dash.itemCount) * 100}%`,
+                  }}
+                />
+              ) : null}
+            </div>
+            <p className="mt-1.5 text-[11px] text-stone/55">
+              Teal healthy · gold low · coral out
+              {dash.expiredCount > 0
+                ? ` · ${dash.expiredCount} already expired`
+                : ""}
+            </p>
+          </div>
         ) : null}
       </section>
 
@@ -350,19 +416,55 @@ export function InventoryManager() {
             </>
           ) : (
             <>
-              <h2 className="font-display text-xl">Details</h2>
-              <p className="mt-2 text-sm text-ink/60">
-                This dashboard shows stock, value, expiry, and alerts. To{" "}
-                <strong>add or receive</strong> inventory (quantity, supplier,
-                cost, measurement), use{" "}
+              <h2 className="font-display text-xl">What needs attention</h2>
+              <p className="mt-1 text-sm text-ink/55">
+                Receive stock under{" "}
                 <span className="font-medium text-teal">Receive & suppliers</span>
-                . Issuers take stock out under{" "}
+                . Take stock out under{" "}
                 <span className="font-medium text-teal">Issue / take-out</span>.
               </p>
-              <p className="mt-3 text-sm text-ink/50">
-                Tap an item on the stock board for full detail, or use the pencil
-                to adjust thresholds and cost.
-              </p>
+              {attention.length === 0 ? (
+                <p className="mt-4 rounded-2xl bg-teal/10 px-3 py-3 text-sm text-ink/70">
+                  Nothing is low, out, or expiring in the next 14 days.
+                </p>
+              ) : (
+                <ul className="mt-4 space-y-2">
+                  {attention.map((item) => (
+                    <AttentionRow
+                      key={item.id}
+                      title={item.title}
+                      detail={item.detail}
+                      tone={item.tone}
+                    />
+                  ))}
+                </ul>
+              )}
+              {dash.topValue.length > 0 ? (
+                <div className="mt-5">
+                  <h3 className="text-sm font-semibold text-ink/80">
+                    Highest stock value
+                  </h3>
+                  <ul className="mt-2 space-y-1.5">
+                    {dash.topValue.map((item) => (
+                      <li
+                        key={item.id}
+                        className="flex items-baseline justify-between gap-3 text-sm"
+                      >
+                        <span className="min-w-0 truncate">
+                          {item.name}
+                          <span className="text-ink/45">
+                            {" "}
+                            · {item.stock_qty} {item.unit}
+                          </span>
+                        </span>
+                        <span className="shrink-0 font-medium">
+                          {formatMoney(item.value)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </>
           )}
         </section>
@@ -535,5 +637,57 @@ export function InventoryManager() {
         onConfirm={() => void confirmDelete()}
       />
     </div>
+  );
+}
+
+function DashStat({
+  label,
+  value,
+  alert = false,
+  className,
+}: {
+  label: string;
+  value: string;
+  alert?: boolean;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-2xl px-3 py-3 backdrop-blur",
+        alert ? "bg-coral/25 ring-1 ring-coral/40" : "bg-white/10",
+        className,
+      )}
+    >
+      <p className="text-[11px] text-stone/60">{label}</p>
+      <p className="mt-1 flex items-center gap-1.5 font-display text-xl sm:text-2xl">
+        {alert ? <AlertTriangle className="h-4 w-4 text-coral" /> : null}
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function AttentionRow({
+  title,
+  detail,
+  tone,
+}: {
+  title: string;
+  detail: string;
+  tone: "bad" | "warn";
+}) {
+  return (
+    <li
+      className={cn(
+        "rounded-2xl border px-3 py-2.5",
+        tone === "bad"
+          ? "border-coral/30 bg-coral/10"
+          : "border-gold/40 bg-gold/15",
+      )}
+    >
+      <p className="text-sm font-medium">{title}</p>
+      <p className="mt-0.5 text-xs text-ink/60">{detail}</p>
+    </li>
   );
 }
