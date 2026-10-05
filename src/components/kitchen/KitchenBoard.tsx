@@ -32,6 +32,7 @@ import {
   updateOrderStatus,
   type CloudSaleLine,
   type CloudSaleOrder,
+  type KitchenLineStatus,
 } from "@/lib/cloud-sales";
 import {
   SALE_ORDER_STATUS_LABELS,
@@ -219,11 +220,12 @@ export function KitchenBoard() {
     if (!ticket || ticket.status === status) return;
 
     setBusyId(ticketKey);
-    const kitchenStatus = status === "completed" ? "served" : status;
+    const kitchenStatus: KitchenLineStatus =
+      status === "completed" ? "served" : status;
     setOrders((prev) =>
-      prev.map((order) => {
+      prev.map((order): CloudSaleOrder => {
         if (order.id !== ticket.order.id) return order;
-        const lines = orderLines(order).map((line) =>
+        const lines: CloudSaleLine[] = orderLines(order).map((line) =>
           lineRound(line) === ticket.round
             ? { ...line, kitchen_status: kitchenStatus }
             : line,
