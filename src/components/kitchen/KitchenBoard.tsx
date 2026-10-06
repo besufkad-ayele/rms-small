@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useState,
@@ -37,7 +39,15 @@ import {
 import {
   SALE_ORDER_STATUS_LABELS,
 } from "@/lib/tenant";
+import { parseMenuDescription } from "@/lib/menu-details";
+import { loadMenuResilient } from "@/lib/offline/resilient";
 import { cn, dayKey, formatMoney } from "@/lib/utils";
+
+type MenuKitchenInfo = { note: string; prepMinutes: number | null };
+
+const MenuKitchenContext = createContext<Map<string, MenuKitchenInfo>>(
+  new Map(),
+);
 
 type KitchenColumnStatus = "placed" | "preparing" | "ready";
 type AdvanceStatus = KitchenColumnStatus | "completed";
@@ -171,6 +181,23 @@ export function KitchenBoard() {
     return () => window.clearInterval(t);
   }, [reload]);
 
+  const [menuInfo, setMenuInfo] = useState<Map<string, MenuKitchenInfo>>(
+    () => new Map(),
+  );
+  useEffect(() => {
+    const apply = (menu: { id: string; description: string }[]) => {
+      const next = new Map<string, MenuKitchenInfo>();
+      for (const item of menu) {
+        const d = parseMenuDescription(item.description);
+        if (d.kitchenNote || d.prepMinutes) {
+          next.set(item.id, { note: d.kitchenNote, prepMinutes: d.prepMinutes });
+        }
+      }
+      setMenuInfo(next);
+    };
+    void loadMenuResilient(orgId, apply).then(apply).catch(() => undefined);
+  }, [orgId]);
+
   useEffect(() => {
     if (!lastServed) return;
     const t = window.setTimeout(() => setLastServed(null), 4500);
@@ -297,6 +324,7 @@ export function KitchenBoard() {
   }
 
   return (
+    <MenuKitchenContext.Provider value={menuInfo}>
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-ink/60">
@@ -395,6 +423,7 @@ export function KitchenBoard() {
         </DragOverlay>
       </DndContext>
     </div>
+    </MenuKitchenContext.Provider>
   );
 }
 
@@ -542,6 +571,7 @@ function OrderCardBody({
 
 function TicketFace({ ticket }: { ticket: KitchenTicket }) {
   const waited = waitMinutes(ticket.sentAt);
+  const menuInfo = useContext(MenuKitchenContext);
   return (
     <>
       <div className="flex items-start justify-between gap-2">
@@ -573,13 +603,28 @@ function TicketFace({ ticket }: { ticket: KitchenTicket }) {
         </p>
       </div>
       <ul className="mt-3 space-y-1">
-        {ticket.lines.map((line, i) => (
-          <li key={i} className="flex items-baseline justify-between gap-2 text-sm">
-            <span className="font-medium">
-              {line.quantity}× {line.name}
-            </span>
-          </li>
-        ))}
+        {ticket.lines.map((line, i) => {
+          const info = line.menu_item_id
+            ? menuInfo.get(line.menu_item_id)
+            : undefined;
+          return (
+            <li key={i} className="text-sm">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="font-medium">
+                  {line.quantity}× {line.name}
+                </span>
+                {info?.prepMinutes ? (
+                  <span className="shrink-0 text-[11px] text-ink/45">
+                    ~{info.prepMinutes} min
+                  </span>
+                ) : null}
+              </div>
+              {info?.note ? (
+                <p className="text-[11px] text-ink/55">{info.note}</p>
+              ) : null}
+            </li>
+          );
+        })}
       </ul>
       {ticket.order.kitchen_note ? (
         <p className="mt-2 rounded-xl bg-white/80 px-2.5 py-1.5 text-xs text-ink/70">

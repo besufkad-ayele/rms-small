@@ -1,5 +1,8 @@
-/** Max original upload size before conversion (500 KB). */
+/** Max stored image size after WebP conversion (500 KB). */
 export const MENU_IMAGE_MAX_BYTES = 500 * 1024;
+
+/** Largest original photo we accept before compressing (phone cameras). */
+export const IMAGE_SOURCE_MAX_BYTES = 20 * 1024 * 1024;
 
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -8,41 +11,61 @@ export function formatBytes(n: number): string {
 }
 
 export function assertMenuImageSize(file: File): void {
-  if (file.size > MENU_IMAGE_MAX_BYTES) {
+  if (!file.type.startsWith("image/") && file.type !== "") {
+    throw new Error("Choose an image file.");
+  }
+  if (file.size > IMAGE_SOURCE_MAX_BYTES) {
     throw new Error(
-      `Photo is too large (${formatBytes(file.size)}). Max ${formatBytes(MENU_IMAGE_MAX_BYTES)}.`,
+      `Photo is too large (${formatBytes(file.size)}). Max ${formatBytes(IMAGE_SOURCE_MAX_BYTES)}.`,
     );
   }
 }
 
-/** Convert an image file to WebP (optional, never throws hard — returns null on failure). */
+/**
+ * Shrink and convert to WebP, lowering size and quality until it fits
+ * MENU_IMAGE_MAX_BYTES. Returns null when the browser cannot decode the file.
+ */
 export async function fileToWebpBlob(
   file: File,
   maxEdge = 960,
   quality = 0.82,
 ): Promise<Blob | null> {
   assertMenuImageSize(file);
+  if (file.type === "image/webp" && file.size <= MENU_IMAGE_MAX_BYTES) {
+    return file;
+  }
+  let bitmap: ImageBitmap;
   try {
-    if (file.type === "image/webp" && file.size < 900_000) {
-      return file;
-    }
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
-    const w = Math.max(1, Math.round(bitmap.width * scale));
-    const h = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.drawImage(bitmap, 0, 0, w, h);
-    bitmap.close();
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob((b) => resolve(b), "image/webp", quality),
-    );
-    return blob;
+    bitmap = await createImageBitmap(file);
   } catch {
     return null;
+  }
+  try {
+    let edge = maxEdge;
+    let q = quality;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
+      const w = Math.max(1, Math.round(bitmap.width * scale));
+      const h = Math.max(1, Math.round(bitmap.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(bitmap, 0, 0, w, h);
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), "image/webp", q),
+      );
+      if (!blob) return null;
+      if (blob.size <= MENU_IMAGE_MAX_BYTES) return blob;
+      edge = Math.round(edge * 0.8);
+      q = Math.max(0.5, q - 0.08);
+    }
+    throw new Error(
+      `Photo is still over ${formatBytes(MENU_IMAGE_MAX_BYTES)} after compressing. Try a simpler photo.`,
+    );
+  } finally {
+    bitmap.close();
   }
 }
 
@@ -51,10 +74,9 @@ export async function uploadMenuImage(
   menuItemId: string,
   file: File,
 ): Promise<string | null> {
-  assertMenuImageSize(file);
   const { createClient } = await import("@/lib/supabase/client");
   const webp = await fileToWebpBlob(file);
-  if (!webp) return null;
+  if (!webp) throw new Error("Could not read this photo. Try another one.");
   const supabase = createClient();
   const path = `${orgId}/${menuItemId}-${Date.now()}.webp`;
   const { error } = await supabase.storage

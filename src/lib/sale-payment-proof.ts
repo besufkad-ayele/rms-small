@@ -1,10 +1,4 @@
-import {
-  assertMenuImageSize,
-  fileToWebpBlob,
-  MENU_IMAGE_MAX_BYTES,
-} from "@/lib/menu-image";
-
-export { MENU_IMAGE_MAX_BYTES as SALE_PROOF_MAX_BYTES };
+import { assertMenuImageSize, fileToWebpBlob } from "@/lib/menu-image";
 
 /** Upload a transfer screenshot for a non-cash sale (owner can review). */
 export async function uploadSalePaymentProof(

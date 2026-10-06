@@ -157,20 +157,45 @@ async function writeLocal(
   });
 }
 
+function missingOrgMetaColumn(message: string): string | null {
+  const match = /Could not find the '([^']+)' column/i.exec(message);
+  return match?.[1] ?? null;
+}
+
+/** Select org_meta, dropping columns this project has not migrated yet. */
+async function selectOrgMeta(
+  orgId: string,
+  columns: string[],
+): Promise<Record<string, unknown> | null> {
+  const supabase = createClient();
+  let cols = [...columns];
+  for (let attempt = 0; attempt < 6 && cols.length > 0; attempt++) {
+    const { data, error } = await supabase
+      .from("org_meta")
+      .select(cols.join(", "))
+      .eq("organization_id", orgId)
+      .maybeSingle();
+    if (!error) return (data as Record<string, unknown> | null) ?? null;
+    const missing = missingOrgMetaColumn(error.message);
+    if (!missing || !cols.includes(missing)) return null;
+    cols = cols.filter((column) => column !== missing);
+  }
+  return null;
+}
+
 /** Fetch full receipt settings from Supabase (always hits network). */
 export async function fetchOrgReceiptSettingsRemote(
   orgId: string,
 ): Promise<CachedReceiptSettings> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("org_meta")
-    .select(
-      "vat_percent, service_percent, receipt_footer, receipt_profile, updated_at",
-    )
-    .eq("organization_id", orgId)
-    .maybeSingle();
+  const data = await selectOrgMeta(orgId, [
+    "vat_percent",
+    "service_percent",
+    "receipt_footer",
+    "receipt_profile",
+    "updated_at",
+  ]);
 
-  if (error || !data) {
+  if (!data) {
     return {
       settings: {
         ...DEFAULT_RECEIPT_SETTINGS,
@@ -305,21 +330,45 @@ export async function saveOrgReceiptSettings(
     .select("receipt_seq, seeded")
     .eq("organization_id", orgId)
     .maybeSingle();
-  const { data, error } = await supabase
-    .from("org_meta")
-    .upsert({
-      organization_id: orgId,
-      receipt_seq: meta?.receipt_seq ?? 0,
-      seeded: meta?.seeded ?? false,
-      vat_percent: normalized.vat_percent,
-      service_percent: normalized.service_percent,
-      receipt_footer: normalized.profile.footer,
-      receipt_profile: normalized.profile,
-      updated_at: now,
-    })
-    .select("updated_at")
-    .single();
-  if (error) throw new Error(error.message);
+  let payload: Record<string, unknown> = {
+    organization_id: orgId,
+    receipt_seq: meta?.receipt_seq ?? 0,
+    seeded: meta?.seeded ?? false,
+    vat_percent: normalized.vat_percent,
+    service_percent: normalized.service_percent,
+    receipt_footer: normalized.profile.footer,
+    receipt_profile: normalized.profile,
+    updated_at: now,
+  };
+  let data: { updated_at?: string } | null = null;
+  let errorMessage: string | null = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const select = "updated_at" in payload ? "updated_at" : "organization_id";
+    const result = await supabase
+      .from("org_meta")
+      .upsert(payload)
+      .select(select)
+      .single();
+    if (!result.error && result.data) {
+      data = result.data as { updated_at?: string };
+      errorMessage = null;
+      break;
+    }
+    const missing = result.error?.message
+      ? /Could not find the '([^']+)' column/i.exec(result.error.message)?.[1]
+      : null;
+    if (!missing || !(missing in payload)) {
+      errorMessage = result.error?.message || "Could not save receipt settings";
+      break;
+    }
+    const next = { ...payload };
+    delete next[missing];
+    payload = next;
+    errorMessage = result.error?.message || null;
+  }
+  if (errorMessage || !data) {
+    throw new Error(errorMessage || "Could not save receipt settings");
+  }
 
   // Write-through: every device that saves updates local cache immediately.
   await writeLocal(orgId, {

@@ -468,6 +468,18 @@ export async function completeCloudSale(input: {
   return mapOrder({ ...order, lines: orderLines });
 }
 
+/** Waiter photo of a transfer. Does not mark the ticket paid. */
+export async function attachOrderPaymentProof(input: {
+  orgId: string;
+  orderId: string;
+  paymentProofUrl: string;
+}) {
+  const data = await updateSaleOrderRow(input.orgId, input.orderId, {
+    payment_proof_url: input.paymentProofUrl.trim(),
+  });
+  return mapOrder(data);
+}
+
 /** Accept payment on an open ticket — unlocks receipt print + finance. */
 export async function markOrderPaid(input: {
   orgId: string;

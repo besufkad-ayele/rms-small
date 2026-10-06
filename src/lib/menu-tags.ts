@@ -1,3 +1,5 @@
+import { DETAIL_TAG_LABELS } from "@/lib/menu-details";
+
 /** Curated menu tags — multi-select details beyond category. */
 export const MENU_TAGS = [
   { id: "starters", label: "Starters", pinTop: true },
@@ -27,7 +29,7 @@ const PIN_TOP = new Set<string>(
 );
 
 export function tagLabel(id: string): string {
-  return LABEL_BY_ID[id] || id.replace(/-/g, " ");
+  return LABEL_BY_ID[id] || DETAIL_TAG_LABELS[id] || id.replace(/-/g, " ");
 }
 
 export function normalizeTags(tags: string[] | null | undefined): string[] {

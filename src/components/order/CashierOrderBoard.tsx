@@ -7,13 +7,14 @@ import {
   CheckCircle2,
   ExternalLink,
   ImagePlus,
+  Plus,
   Printer,
   X,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { AddToOrderPanel } from "@/components/order/AddToOrderPanel";
 import { ThermalReceipt } from "@/components/order/ThermalReceipt";
 import {
+  attachOrderPaymentProof,
   isOrderPaid,
   lineRound,
   listCloudOrders,
@@ -23,7 +24,7 @@ import {
   updateOrderStatus,
   type CloudSaleOrder,
 } from "@/lib/cloud-sales";
-import { formatBytes, MENU_IMAGE_MAX_BYTES } from "@/lib/menu-image";
+import { formatBytes, IMAGE_SOURCE_MAX_BYTES } from "@/lib/menu-image";
 import {
   DEFAULT_PAYMENT_METHODS,
   enabledPaymentMethods,
@@ -40,13 +41,19 @@ import {
 } from "@/lib/tenant";
 import { cn, dayKey, formatDateTime, formatMoney } from "@/lib/utils";
 
-type FilterMode = "open" | "today" | "all";
+type FilterMode = "open" | "paid" | "today" | "completed" | "all";
 
-export function CashierOrderBoard() {
+export function CashierOrderBoard({
+  onAddItems,
+}: {
+  /** Jump back to Place order and add dishes onto this receipt. */
+  onAddItems?: (order: CloudSaleOrder) => void;
+}) {
   const { tenant } = useAuth();
   const orgId = tenant!.organization.id;
   const owner = isOwner(tenant!.membership);
   const cashierOps = canCashierOrderOps(tenant!.membership);
+  const waiterView = !cashierOps;
   const [orders, setOrders] = useState<CloudSaleOrder[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -63,7 +70,6 @@ export function CashierOrderBoard() {
   const [payMethods, setPayMethods] = useState<OrgPaymentMethod[]>(
     enabledPaymentMethods(DEFAULT_PAYMENT_METHODS),
   );
-  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     void getOrgPaymentMethods(orgId)
@@ -76,21 +82,36 @@ export function CashierOrderBoard() {
       const o = await listCloudOrders(orgId, {
         dayKey: filter === "all" ? undefined : dayKey(new Date()),
         statuses:
-          filter === "open"
-            ? ["placed", "preparing", "ready"]
-            : undefined,
+          filter === "completed"
+            ? ["completed"]
+            : filter === "open" && !waiterView
+              ? ["placed", "preparing", "ready"]
+              : undefined,
         limit: owner && filter === "all" ? 250 : 120,
       });
-      const list =
-        filter === "all"
-          ? o
-          : o.filter((x) => x.status !== "canceled" || owner);
+      let list: CloudSaleOrder[];
+      if (filter === "completed") {
+        list = o.filter((order) => order.status === "completed");
+      } else if (filter === "all") {
+        list = o;
+      } else {
+        list = o.filter(
+          (order) =>
+            order.status !== "completed" &&
+            (order.status !== "canceled" || (owner && !waiterView)),
+        );
+        if (waiterView) {
+          list = list.filter((order) =>
+            filter === "paid" ? isOrderPaid(order) : !isOrderPaid(order),
+          );
+        }
+      }
       setOrders(list);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load orders");
     }
-  }, [orgId, filter, owner]);
+  }, [orgId, filter, owner, waiterView]);
 
   useEffect(() => {
     void reload();
@@ -140,9 +161,9 @@ export function CashierOrderBoard() {
       setProofPreview(null);
       return;
     }
-    if (file.size > MENU_IMAGE_MAX_BYTES) {
+    if (file.size > IMAGE_SOURCE_MAX_BYTES) {
       setError(
-        `Proof image too large (${formatBytes(file.size)}). Max ${formatBytes(MENU_IMAGE_MAX_BYTES)}.`,
+        `Proof image too large (${formatBytes(file.size)}). Max ${formatBytes(IMAGE_SOURCE_MAX_BYTES)}.`,
       );
       return;
     }
@@ -158,6 +179,31 @@ export function CashierOrderBoard() {
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Update failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /** Waiter sends a payment photo. The ticket stays unpaid until a cashier verifies it. */
+  async function sendPaymentPhoto(order: CloudSaleOrder, file: File) {
+    if (file.size > IMAGE_SOURCE_MAX_BYTES) {
+      setError(
+        `Proof image too large (${formatBytes(file.size)}). Max ${formatBytes(IMAGE_SOURCE_MAX_BYTES)}.`,
+      );
+      return;
+    }
+    setBusyId(order.id);
+    setError(null);
+    try {
+      const paymentProofUrl = await uploadSalePaymentProof(orgId, file);
+      await attachOrderPaymentProof({
+        orgId,
+        orderId: order.id,
+        paymentProofUrl,
+      });
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not send the photo");
     } finally {
       setBusyId(null);
     }
@@ -200,6 +246,10 @@ export function CashierOrderBoard() {
   }
 
   async function requestCancel(order: CloudSaleOrder) {
+    if (!canRequestCancel(order)) {
+      setError("Paid or completed orders cannot be canceled.");
+      return;
+    }
     if (
       !window.confirm(
         `Request cancel for ${order.receipt_number}? The owner must confirm the real cancellation.`,
@@ -245,26 +295,34 @@ export function CashierOrderBoard() {
     );
   }
 
-  const filters: { id: FilterMode; label: string }[] = owner
+  const filters: { id: FilterMode; label: string }[] = waiterView
     ? [
         { id: "open", label: "Open" },
-        { id: "today", label: "All today" },
-        { id: "all", label: "All orders" },
+        { id: "paid", label: "Paid" },
+        { id: "completed", label: "Completed" },
       ]
-    : [
-        { id: "open", label: "Open" },
-        { id: "today", label: "All today" },
-      ];
+    : owner
+      ? [
+          { id: "open", label: "Open" },
+          { id: "today", label: "All today" },
+          { id: "completed", label: "Completed" },
+          { id: "all", label: "All orders" },
+        ]
+      : [
+          { id: "open", label: "Open" },
+          { id: "today", label: "All today" },
+          { id: "completed", label: "Completed" },
+        ];
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-ink/60">
-          {owner
-            ? "Mark unpaid tickets as paid, then print. Complete when served."
-            : cashierOps
-              ? "Mark as paid, then print. Complete when served. Cancel needs owner."
-              : "Your open tickets — mark complete when served."}
+          {waiterView
+            ? "Add dishes on open tickets. Photograph the payment so the cashier can mark it paid."
+            : owner
+              ? "Check the payment photo, then mark paid and print."
+              : "Check the payment photo, then mark paid and print."}
         </p>
         <div className="flex flex-wrap gap-2">
           {filters.map((f) => (
@@ -289,11 +347,6 @@ export function CashierOrderBoard() {
           </button>
         </div>
       </div>
-      {notice ? (
-        <p className="rounded-xl border border-teal/30 bg-teal/10 px-3 py-2 text-sm text-ink">
-          {notice}
-        </p>
-      ) : null}
       {error ? (
         <p className="rounded-xl bg-coral/15 px-3 py-2 text-sm text-coral">
           {error}
@@ -313,6 +366,7 @@ export function CashierOrderBoard() {
                 busy={busyId === selected.id}
                 cashierOps={cashierOps}
                 owner={owner}
+                onAddItems={onAddItems}
                 payMethods={payMethods}
                 payDraft={
                   payDraft?.orderId === selected.id ? payDraft : null
@@ -332,11 +386,7 @@ export function CashierOrderBoard() {
                 onPrint={() => startPrint(selected)}
                 onComplete={() => void markCompleted(selected)}
                 onCancel={() => void requestCancel(selected)}
-                orgId={orgId}
-                onAdded={async (message) => {
-                  setNotice(message);
-                  await reload();
-                }}
+                onSendPhoto={(file) => void sendPaymentPhoto(selected, file)}
               />
             ) : null}
           </div>
@@ -377,28 +427,38 @@ export function CashierOrderBoard() {
                           {qty} items
                           {sends > 1 ? ` · ${sends} kitchen sends` : ""} ·{" "}
                           {formatDateTime(order.created_at)}
-                          {order.payment_proof_url ? " · proof" : ""}
+                          {order.payment_proof_url
+                            ? paid
+                              ? " · photo"
+                              : cashierOps
+                                ? " · photo to check"
+                                : " · photo sent"
+                            : ""}
                         </p>
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1">
                         <StatusPill status={order.status} />
-                        <PaymentPill status={paid ? "paid" : "unpaid"} />
+                        {cashierOps ? (
+                          <PaymentPill status={paid ? "paid" : "unpaid"} />
+                        ) : null}
                       </div>
                     </div>
-                    <div className="mt-2 flex items-center justify-between text-xs">
-                      <span className="text-ink/50">
-                        {paid
-                          ? `${order.payment_method.toUpperCase()}${
-                              order.payment_reference
-                                ? ` · ${order.payment_reference}`
-                                : ""
-                            }`
-                          : "Awaiting payment"}
-                      </span>
-                      <span className="font-semibold text-teal">
-                        {formatMoney(Number(order.total))}
-                      </span>
-                    </div>
+                    {cashierOps ? (
+                      <div className="mt-2 flex items-center justify-between text-xs">
+                        <span className="text-ink/50">
+                          {paid
+                            ? `${order.payment_method.toUpperCase()}${
+                                order.payment_reference
+                                  ? ` · ${order.payment_reference}`
+                                  : ""
+                              }`
+                            : "Awaiting payment"}
+                        </span>
+                        <span className="font-semibold text-teal">
+                          {formatMoney(Number(order.total))}
+                        </span>
+                      </div>
+                    ) : null}
                   </button>
                 </li>
               );
@@ -425,8 +485,8 @@ function OrderDetailPanel({
   onPrint,
   onComplete,
   onCancel,
-  orgId,
-  onAdded,
+  onAddItems,
+  onSendPhoto,
 }: {
   order: CloudSaleOrder;
   busy: boolean;
@@ -442,8 +502,8 @@ function OrderDetailPanel({
   onPrint: () => void;
   onComplete: () => void;
   onCancel: () => void;
-  orgId: string;
-  onAdded: (message: string) => void;
+  onAddItems?: (order: CloudSaleOrder) => void;
+  onSendPhoto?: (file: File) => void;
 }) {
   const lines = orderLines(order);
   const grouped = new Map<number, typeof lines>();
@@ -453,7 +513,7 @@ function OrderDetailPanel({
   }
   const groups = [...grouped.entries()].sort((a, b) => a[0] - b[0]);
   const paid = isOrderPaid(order);
-  const showProof = Boolean(order.payment_proof_url) && (owner || cashierOps);
+  const showProof = Boolean(order.payment_proof_url);
   const methodOptions =
     payMethods.length > 0
       ? payMethods
@@ -483,20 +543,24 @@ function OrderDetailPanel({
             {formatDateTime(order.created_at)}
             {order.place_label ? ` · ${order.place_label}` : ""}
           </p>
-          <p className="mt-0.5 text-xs text-ink/45">
-            {order.cashier_name}
-            {paid
-              ? ` · ${paidLabel}${
-                  order.payment_reference
-                    ? ` · ${order.payment_reference}`
-                    : ""
-                }`
-              : " · unpaid"}
-          </p>
+          {cashierOps ? (
+            <p className="mt-0.5 text-xs text-ink/45">
+              {order.cashier_name}
+              {paid
+                ? ` · ${paidLabel}${
+                    order.payment_reference
+                      ? ` · ${order.payment_reference}`
+                      : ""
+                  }`
+                : " · unpaid"}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-col items-end gap-1">
           <StatusPill status={order.status} />
-          <PaymentPill status={paid ? "paid" : "unpaid"} />
+          {cashierOps ? (
+            <PaymentPill status={paid ? "paid" : "unpaid"} />
+          ) : null}
         </div>
       </div>
 
@@ -518,7 +582,9 @@ function OrderDetailPanel({
       {showProof ? (
         <div className="mt-3 space-y-1.5">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-ink/45">
-            Payment proof
+            {cashierOps && !paid
+              ? "Payment photo to verify"
+              : "Payment photo"}
           </p>
           <a
             href={order.payment_proof_url!}
@@ -558,9 +624,11 @@ function OrderDetailPanel({
                   <span className="min-w-0 truncate">
                     {line.quantity}× {line.name}
                   </span>
-                  <span className="shrink-0 tabular-nums text-ink/70">
-                    {formatMoney(Number(line.line_total))}
-                  </span>
+                  {cashierOps ? (
+                    <span className="shrink-0 tabular-nums text-ink/70">
+                      {formatMoney(Number(line.line_total))}
+                    </span>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -568,10 +636,52 @@ function OrderDetailPanel({
         ))}
       </div>
 
-      {cashierOps ? (
-        <AddToOrderPanel orgId={orgId} order={order} onAdded={onAdded} />
+      {!cashierOps && !paid && order.status !== "canceled" && onSendPhoto ? (
+        <div className="mt-3 space-y-2 rounded-2xl border border-gold/30 bg-gold/10 p-3">
+          <p className="text-xs font-semibold text-ink/70">
+            {order.payment_proof_url
+              ? "Photo sent. The cashier marks this paid after checking it."
+              : "Photograph the payment. The cashier will see it and mark the receipt paid."}
+          </p>
+          <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-ink/20 bg-white px-3 py-2.5 text-xs font-medium text-ink/70">
+            <ImagePlus className="h-3.5 w-3.5" />
+            {busy
+              ? "Sending photo…"
+              : order.payment_proof_url
+                ? "Replace payment photo"
+                : "Take payment photo"}
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              disabled={busy}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) onSendPhoto(file);
+              }}
+            />
+          </label>
+        </div>
       ) : null}
 
+      {onAddItems &&
+      order.status !== "canceled" &&
+      order.status !== "completed" &&
+      (cashierOps || !paid) ? (
+        <button
+          type="button"
+          onClick={() => onAddItems(order)}
+          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-teal/30 bg-teal/10 px-3 py-2.5 text-xs font-semibold text-teal"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add more to this receipt
+        </button>
+      ) : null}
+
+      {cashierOps ? (
+      <>
       <div className="mt-3 space-y-1 border-t border-ink/8 pt-3 text-sm">
         <div className="flex justify-between text-ink/60">
           <span>Subtotal</span>
@@ -593,7 +703,11 @@ function OrderDetailPanel({
 
       {cashierOps && !paid && order.status !== "canceled" ? (
         <div className="mt-4 space-y-2 rounded-2xl border border-gold/30 bg-gold/10 p-3">
-          <p className="text-xs font-semibold text-ink/70">Mark as paid</p>
+          <p className="text-xs font-semibold text-ink/70">
+            {order.payment_proof_url
+              ? "Photo is above. Mark paid after you verify it."
+              : "Mark as paid"}
+          </p>
           <select
             value={safeMethod}
             onChange={(e) =>
@@ -682,9 +796,7 @@ function OrderDetailPanel({
             Complete
           </button>
         ) : null}
-        {cashierOps &&
-        !order.cancel_requested &&
-        order.status !== "canceled" ? (
+        {cashierOps && canRequestCancel(order) ? (
           <button
             type="button"
             disabled={busy}
@@ -696,7 +808,18 @@ function OrderDetailPanel({
           </button>
         ) : null}
       </div>
+      </>
+      ) : null}
     </section>
+  );
+}
+
+function canRequestCancel(order: CloudSaleOrder): boolean {
+  return (
+    !isOrderPaid(order) &&
+    !order.cancel_requested &&
+    order.status !== "completed" &&
+    order.status !== "canceled"
   );
 }
 

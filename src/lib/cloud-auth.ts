@@ -78,10 +78,26 @@ export async function signOut() {
   await supabase.auth.signOut();
 }
 
+/** Network or server hiccup, as opposed to Supabase saying the session is gone. */
+function isTransientAuthError(error: { name?: string; status?: number }) {
+  if (error.name === "AuthRetryableFetchError") return true;
+  const status = Number(error.status ?? 0);
+  return status === 0 || status === 408 || status === 429 || status >= 500;
+}
+
+/**
+ * Signed-in user. When Supabase cannot be reached, fall back to the stored
+ * session instead of treating the person as logged out.
+ */
 export async function getUser(): Promise<User | null> {
   const supabase = createClient();
-  const { data } = await supabase.auth.getUser();
-  return data.user;
+  const { data, error } = await supabase.auth.getUser();
+  if (data.user) return data.user;
+  if (error && isTransientAuthError(error)) {
+    const { data: stored } = await supabase.auth.getSession();
+    return stored.session?.user ?? null;
+  }
+  return null;
 }
 
 /**
@@ -92,13 +108,7 @@ export async function getUser(): Promise<User | null> {
 export async function loadTenantDetailed(): Promise<TenantLoadResult> {
   try {
     const supabase = createClient();
-    const {
-      data: { user },
-      error: userErr,
-    } = await supabase.auth.getUser();
-    if (userErr) {
-      return { tenant: null, hasMembership: false, error: userErr.message };
-    }
+    const user = await getUser();
     if (!user) {
       return { tenant: null, hasMembership: false, error: null };
     }

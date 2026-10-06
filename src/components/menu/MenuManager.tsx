@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Camera, ImagePlus, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
@@ -22,6 +22,15 @@ import {
   sortMenuByTags,
   tagLabel,
 } from "@/lib/menu-tags";
+import {
+  EMPTY_MENU_DETAILS,
+  MENU_ALLERGENS,
+  MENU_SPICE_LEVELS,
+  composeMenuDescription,
+  isDetailTag,
+  parseMenuDescription,
+  type MenuDetails,
+} from "@/lib/menu-details";
 import {
   MENU_IMAGE_MAX_BYTES,
   assertMenuImageSize,
@@ -44,7 +53,7 @@ export function MenuManager() {
   const [category, setCategory] = useState<MenuCategory>("hot-drinks");
   const [price, setPrice] = useState(0);
   const [available, setAvailable] = useState(true);
-  const [description, setDescription] = useState("");
+  const [details, setDetails] = useState<MenuDetails>(EMPTY_MENU_DETAILS);
   const [tags, setTags] = useState<string[]>([]);
   const [customTag, setCustomTag] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -101,12 +110,42 @@ export function MenuManager() {
     setCategory("hot-drinks");
     setPrice(0);
     setAvailable(true);
-    setDescription("");
+    setDetails(EMPTY_MENU_DETAILS);
     setTags([]);
     setCustomTag("");
     setImageFile(null);
     setImagePreview(null);
     setRecipe([]);
+  }
+
+  function setDetail<K extends keyof MenuDetails>(key: K, value: MenuDetails[K]) {
+    setDetails((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function setSpice(id: string) {
+    setTags((prev) => [
+      ...prev.filter((t) => !t.startsWith("spice-")),
+      ...(id ? [id] : []),
+    ]);
+  }
+
+  function pickPhoto(input: HTMLInputElement) {
+    const file = input.files?.[0] || null;
+    input.value = "";
+    if (!file) return;
+    try {
+      assertMenuImageSize(file);
+      setImageFile(file);
+      setImagePreview(URL.createObjectURL(file));
+      setMessage(null);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Could not use this photo");
+    }
+  }
+
+  function clearPhoto() {
+    setImageFile(null);
+    setImagePreview(editing?.image_url || null);
   }
 
   function startEdit(item: CloudMenuItem) {
@@ -115,7 +154,7 @@ export function MenuManager() {
     setCategory(item.category);
     setPrice(item.price);
     setAvailable(item.available);
-    setDescription(item.description || "");
+    setDetails(parseMenuDescription(item.description));
     setTags(normalizeTags(item.tags));
     setRecipe(item.recipe || []);
     setImageFile(null);
@@ -145,7 +184,7 @@ export function MenuManager() {
         category,
         price: Number(price),
         available,
-        description,
+        description: composeMenuDescription(details),
         tags: normalizeTags(tags),
         recipe,
         image_url: editing?.image_url ?? null,
@@ -160,9 +199,11 @@ export function MenuManager() {
           if (url) {
             await upsertMenu(orgId, { ...base, id: menuId, image_url: url });
           }
-        } catch {
+        } catch (err) {
           setMessage(
-            "Item saved — photo upload failed (edit to retry). Other fields are fine.",
+            `Item saved, but the photo did not upload${
+              err instanceof Error ? ` (${err.message})` : ""
+            }. Edit the item to try again.`,
           );
           reset();
           await reload();
@@ -300,10 +341,15 @@ export function MenuManager() {
                   Add
                 </button>
               </div>
-              {tags.some((t) => !MENU_TAGS.some((p) => p.id === t)) ? (
+              {tags.some(
+                (t) => !isDetailTag(t) && !MENU_TAGS.some((p) => p.id === t),
+              ) ? (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {tags
-                    .filter((t) => !MENU_TAGS.some((p) => p.id === t))
+                    .filter(
+                      (t) =>
+                        !isDetailTag(t) && !MENU_TAGS.some((p) => p.id === t),
+                    )
                     .map((t) => (
                       <button
                         key={t}
@@ -319,12 +365,116 @@ export function MenuManager() {
             </div>
 
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">Details</span>
+              <span className="mb-1 block text-ink/60">
+                Description for customers
+              </span>
               <textarea
-                className="field min-h-24"
-                placeholder="Ingredients, size, notes for staff…"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                className="field min-h-20"
+                placeholder="What it is, how it tastes, what comes with it"
+                value={details.summary}
+                onChange={(e) => setDetail("summary", e.target.value)}
+              />
+            </label>
+
+            <label className="block text-sm">
+              <span className="mb-1 block text-ink/60">Ingredients</span>
+              <input
+                className="field"
+                placeholder="e.g. pasta, tomato, onion, garlic, basil"
+                value={details.ingredients}
+                onChange={(e) => setDetail("ingredients", e.target.value)}
+              />
+            </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-sm">
+                <span className="mb-1 block text-ink/60">Portion / size</span>
+                <input
+                  className="field"
+                  placeholder="e.g. 1 plate, 250 ml"
+                  value={details.portion}
+                  onChange={(e) => setDetail("portion", e.target.value)}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-ink/60">Prep time (min)</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  className="field"
+                  placeholder="e.g. 12"
+                  value={details.prepMinutes ?? ""}
+                  onChange={(e) =>
+                    setDetail(
+                      "prepMinutes",
+                      e.target.value ? Number(e.target.value) : null,
+                    )
+                  }
+                />
+              </label>
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-sm text-ink/60">Allergens</p>
+              <div className="flex flex-wrap gap-1.5">
+                {MENU_ALLERGENS.map((a) => {
+                  const on = tags.includes(a.id);
+                  return (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => toggleTag(a.id)}
+                      className={cn(
+                        "rounded-full px-2.5 py-1 text-xs font-medium transition",
+                        on
+                          ? "bg-coral text-white"
+                          : "bg-ink/5 text-ink/70 hover:bg-ink/10",
+                      )}
+                    >
+                      {a.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-sm text-ink/60">Spice level</p>
+              <div className="flex flex-wrap gap-1.5">
+                {MENU_SPICE_LEVELS.map((s) => {
+                  const current =
+                    tags.find((t) => t.startsWith("spice-")) ?? "";
+                  const on = current === s.id;
+                  return (
+                    <button
+                      key={s.id || "none"}
+                      type="button"
+                      onClick={() => setSpice(s.id)}
+                      className={cn(
+                        "rounded-full px-2.5 py-1 text-xs font-medium transition",
+                        on
+                          ? "bg-gold text-ink"
+                          : "bg-ink/5 text-ink/70 hover:bg-ink/10",
+                      )}
+                    >
+                      {s.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <label className="block text-sm">
+              <span className="mb-1 block text-ink/60">
+                Kitchen note{" "}
+                <span className="text-ink/40">(staff only, shown on tickets)</span>
+              </span>
+              <input
+                className="field"
+                placeholder="e.g. Plate warm, add basil on top"
+                value={details.kitchenNote}
+                onChange={(e) => setDetail("kitchenNote", e.target.value)}
               />
             </label>
 
@@ -332,43 +482,52 @@ export function MenuManager() {
               <span className="mb-1 block text-ink/60">
                 Food photo{" "}
                 <span className="text-ink/40">
-                  (optional · WebP · max {formatBytes(MENU_IMAGE_MAX_BYTES)})
+                  (optional · saved as WebP under{" "}
+                  {formatBytes(MENU_IMAGE_MAX_BYTES)})
                 </span>
               </span>
-              <input
-                type="file"
-                accept="image/*"
-                className="field file:mr-3 file:rounded-lg file:border-0 file:bg-ink/5 file:px-3 file:py-1.5"
-                onChange={(e) => {
-                  const input = e.target;
-                  const file = input.files?.[0] || null;
-                  if (!file) {
-                    setImageFile(null);
-                    if (!editing?.image_url) setImagePreview(null);
-                    return;
-                  }
-                  try {
-                    assertMenuImageSize(file);
-                    setImageFile(file);
-                    setImagePreview(URL.createObjectURL(file));
-                    setMessage(null);
-                  } catch (err) {
-                    setImageFile(null);
-                    setImagePreview(editing?.image_url || null);
-                    input.value = "";
-                    setMessage(
-                      err instanceof Error ? err.message : "Photo too large",
-                    );
-                  }
-                }}
-              />
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-ink/20 bg-white px-3 py-2.5 text-xs font-medium text-ink/70">
+                  <Camera className="h-4 w-4" />
+                  Take photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={(e) => pickPhoto(e.target)}
+                  />
+                </label>
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-ink/20 bg-white px-3 py-2.5 text-xs font-medium text-ink/70">
+                  <ImagePlus className="h-4 w-4" />
+                  Choose from library
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => pickPhoto(e.target)}
+                  />
+                </label>
+              </div>
               {imagePreview ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={imagePreview}
-                  alt=""
-                  className="mt-2 h-28 w-28 rounded-2xl object-cover"
-                />
+                <div className="relative mt-2 w-fit">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={imagePreview}
+                    alt=""
+                    className="h-32 w-32 rounded-2xl object-cover"
+                  />
+                  {imageFile ? (
+                    <button
+                      type="button"
+                      onClick={clearPhoto}
+                      aria-label="Remove new photo"
+                      className="absolute right-1.5 top-1.5 rounded-full bg-black/60 p-1 text-white"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
             </div>
 
@@ -535,9 +694,7 @@ export function MenuManager() {
                       </span>
                     ))}
                   </div>
-                  {item.description ? (
-                    <p className="mt-1 text-xs text-ink/60">{item.description}</p>
-                  ) : null}
+                  <MenuItemDetails description={item.description} />
                   <p className="mt-1 text-xs text-ink/55">
                     {formatMoney(item.price)} · {item.vote_count} sold ·{" "}
                     {item.available ? "available" : "hidden"}
@@ -583,6 +740,25 @@ export function MenuManager() {
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void confirmDelete()}
       />
+    </div>
+  );
+}
+
+function MenuItemDetails({ description }: { description: string }) {
+  const d = parseMenuDescription(description);
+  const facts = [
+    d.portion,
+    d.prepMinutes ? `${d.prepMinutes} min prep` : "",
+  ].filter(Boolean);
+  if (!d.summary && !d.ingredients && !facts.length && !d.kitchenNote) {
+    return null;
+  }
+  return (
+    <div className="mt-1 space-y-0.5 text-xs text-ink/60">
+      {d.summary ? <p>{d.summary}</p> : null}
+      {d.ingredients ? <p>Ingredients: {d.ingredients}</p> : null}
+      {facts.length ? <p>{facts.join(" · ")}</p> : null}
+      {d.kitchenNote ? <p className="text-ink/45">Kitchen: {d.kitchenNote}</p> : null}
     </div>
   );
 }
