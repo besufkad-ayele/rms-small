@@ -10,6 +10,7 @@ import {
   moduleLabels,
   type ModuleState,
 } from "./platform-ui";
+import { ActionButton } from "./feedback";
 
 export function OnboardingSection({
   rows,
@@ -49,9 +50,9 @@ export function OnboardingSection({
   followUpNoteByOrg: Record<string, string>;
   setFollowUpNoteByOrg: Dispatch<SetStateAction<Record<string, string>>>;
   busy: boolean;
-  onApprove: (row: PlatformTenantRow) => void;
-  onReject: (row: PlatformTenantRow) => void;
-  onOpenDoc: (path: string | null | undefined) => void;
+  onApprove: (row: PlatformTenantRow) => Promise<void> | void;
+  onReject: (row: PlatformTenantRow) => Promise<void> | void;
+  onOpenDoc: (path: string | null | undefined) => Promise<void> | void;
   onOpenDetail: (id: string) => void;
 }) {
   return (
@@ -104,22 +105,22 @@ export function OnboardingSection({
                 </div>
                 {status === "pending" ? (
                   <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
+                    <ActionButton
                       disabled={busy}
-                      onClick={() => onApprove(row)}
-                      className="rounded-xl bg-teal px-3 py-2 text-xs font-semibold text-white"
+                      pendingLabel="Approving…"
+                      onAction={() => onApprove(row)}
+                      className="min-h-11 w-full rounded-xl bg-teal px-3 py-2.5 text-xs font-semibold text-white sm:w-auto"
                     >
                       Approve & start trial
-                    </button>
-                    <button
-                      type="button"
+                    </ActionButton>
+                    <ActionButton
                       disabled={busy}
-                      onClick={() => onReject(row)}
-                      className="rounded-xl border border-coral/30 bg-coral/10 px-3 py-2 text-xs font-semibold text-coral"
+                      pendingLabel="Rejecting…"
+                      onAction={() => onReject(row)}
+                      className="min-h-11 w-full rounded-xl border border-coral/30 bg-coral/10 px-3 py-2.5 text-xs font-semibold text-coral sm:w-auto"
                     >
                       Reject
-                    </button>
+                    </ActionButton>
                   </div>
                 ) : null}
               </div>
@@ -239,24 +240,24 @@ export function OnboardingSection({
               ) : null}
 
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <button
-                  type="button"
-                  className="rounded-lg bg-stone px-2 py-1 underline disabled:opacity-40"
+                <ActionButton
+                  className="rounded-lg bg-stone px-2 py-1 underline"
                   disabled={!org.business_license_url}
-                  onClick={() =>
+                  pendingLabel="Opening…"
+                  onAction={async () =>
                     onOpenDoc(org.business_license_url as string)
                   }
                 >
-                  License {org.business_license_url ? "↗" : "(none)"}
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg bg-stone px-2 py-1 underline disabled:opacity-40"
+                  {`License ${org.business_license_url ? "↗" : "(none)"}`}
+                </ActionButton>
+                <ActionButton
+                  className="rounded-lg bg-stone px-2 py-1 underline"
                   disabled={!org.id_document_url}
-                  onClick={() => onOpenDoc(org.id_document_url as string)}
+                  pendingLabel="Opening…"
+                  onAction={async () => onOpenDoc(org.id_document_url as string)}
                 >
-                  ID {org.id_document_url ? "↗" : "(none)"}
-                </button>
+                  {`ID ${org.id_document_url ? "↗" : "(none)"}`}
+                </ActionButton>
               </div>
             </article>
           );

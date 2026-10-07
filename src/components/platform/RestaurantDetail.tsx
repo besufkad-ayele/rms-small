@@ -1,33 +1,67 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { assignPublicSlugAction } from "@/app/m/actions";
 import {
   addAdminNoteAction,
   expireAccessAction,
   extendTrialAction,
   grantPaidMonthsAction,
-  resetSubscriberPasswordAction,
   setFollowUpAction,
   startTrialAction,
   updateTenantSubscriptionAction,
   type PaymentProofRow,
   type PlatformTenantRow,
 } from "@/app/platform/actions";
-import { packageModuleFlags, type PackageRow } from "@/lib/pricing";
-import type { SubStatus } from "@/lib/tenant";
-import { formatDateTime, formatMoney } from "@/lib/utils";
+import { SparkLines } from "@/components/finance/SparkLines";
 import {
+  accessEndOf,
+  daysSince,
+  daysUntil,
+  effectiveStatus,
+  relativeDays,
+  type TenantUsage,
+} from "@/lib/platform-metrics";
+import { includedSeatsFromFlags, packageModuleFlags, type PackageRow } from "@/lib/pricing";
+import { APP_MODULE_LABELS, type AppModule, type SubStatus } from "@/lib/tenant";
+import { cn, formatDateTime, formatMoney } from "@/lib/utils";
+import {
+  EffectiveStatusPill,
   flagsFromSub,
   fromDatetimeLocalValue,
   Info,
+  MODULES,
   ModuleCheckboxes,
+  ScoreBar,
+  SegmentPill,
   StatusPill,
   toDatetimeLocalValue,
+  TrendBadge,
   type ModuleState,
 } from "./platform-ui";
+import { SectionShimmer } from "@/components/ui/Shimmer";
+import { DangerZone } from "./DangerZone";
+import { OrgProfileEditor } from "./OrgProfileEditor";
+import { OwnerLoginCard } from "./OwnerLoginCard";
+import { PaymentRecords } from "./PaymentAdmin";
+import { StaffManager } from "./StaffManager";
+import { ActionButton, AsyncForm, SubmitButton, throwIfError } from "./feedback";
+
+const MODULE_USAGE_HINT: Partial<Record<AppModule, string>> = {
+  menu: "has menu items",
+  ordering: "orders in 30d",
+  kitchen: "orders in 30d",
+  inventory: "stock moves in 30d",
+  finance: "day close / X-report in 30d",
+  hr: "active staff accounts",
+  online: "guest / website orders in 30d",
+};
 
 export function RestaurantDetail({
   row,
+  usage,
+  usageDayKeys,
+  usageLoading,
   proofs,
   packages,
   busy,
@@ -37,8 +71,12 @@ export function RestaurantDetail({
   onBack,
   onOpenDoc,
   onReload,
+  onDeleted,
 }: {
   row: PlatformTenantRow;
+  usage: TenantUsage | undefined;
+  usageDayKeys: string[];
+  usageLoading: boolean;
   proofs: PaymentProofRow[];
   packages: PackageRow[];
   busy: boolean;
@@ -46,8 +84,9 @@ export function RestaurantDetail({
   setError: (v: string | null) => void;
   flashOk: (msg: string) => Promise<void>;
   onBack: () => void;
-  onOpenDoc: (path: string | null | undefined) => void;
+  onOpenDoc: (path: string | null | undefined) => Promise<void> | void;
   onReload: () => Promise<void>;
+  onDeleted: () => Promise<void>;
 }) {
   const org = row.organization;
   const sub = row.subscription;
@@ -66,41 +105,33 @@ export function RestaurantDetail({
   const [extendEndsLocal, setExtendEndsLocal] = useState("");
   const [grantMonths, setGrantMonths] = useState(1);
   const [grantEndsLocal, setGrantEndsLocal] = useState("");
+  const [extraSeats, setExtraSeats] = useState(
+    Number(sub?.extra_staff_seats ?? 0),
+  );
   const [followUpLocal, setFollowUpLocal] = useState("");
   const [followUpNote, setFollowUpNote] = useState("");
   const [note, setNote] = useState("");
-  const [visiblePassword, setVisiblePassword] = useState(
-    String(org.platform_login_password || ""),
-  );
-  const [showPassword, setShowPassword] = useState(true);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const status = effectiveStatus(sub);
+  const accessEnd = accessEndOf(sub);
+  const endDays = daysUntil(accessEnd);
+  const seats = Number(sub?.max_staff_seats ?? 0);
+  const includedSeats = includedSeatsFromFlags(mods);
+  const publicSlug = String(org.public_slug || "");
 
   useEffect(() => {
     setMods(flagsFromSub(sub));
     setPkgCode(String(sub?.package_code || sub?.plan_code || ""));
+    setExtraSeats(Number(sub?.extra_staff_seats ?? 0));
     setFollowUpLocal(toDatetimeLocalValue(sub?.follow_up_at as string | null));
     setFollowUpNote(String(sub?.follow_up_note || ""));
-    setVisiblePassword(String(org.platform_login_password || ""));
     if (sub?.status === "trialing" && sub.trial_ends_at) {
       setExtendEndsLocal(toDatetimeLocalValue(String(sub.trial_ends_at)));
       setTrialEndsLocal(toDatetimeLocalValue(String(sub.trial_ends_at)));
     } else if (sub?.current_period_end) {
       setGrantEndsLocal(toDatetimeLocalValue(String(sub.current_period_end)));
     }
-  }, [sub, org.platform_login_password]);
-
-  async function resetPasswordHere() {
-    setBusy(true);
-    const res = await resetSubscriberPasswordAction(orgId);
-    setBusy(false);
-    if ("error" in res) {
-      setError(String(res.error ?? "Reset failed"));
-      return;
-    }
-    setVisiblePassword(res.password);
-    setShowPassword(true);
-    await flashOk("New password issued — copy and send to the owner.");
-    await onReload();
-  }
+  }, [sub]);
 
   return (
     <div className="space-y-4">
@@ -121,73 +152,88 @@ export function RestaurantDetail({
             </p>
             <div className="mt-2 flex flex-wrap gap-1">
               <StatusPill
-                status={String(org.verification_status || "pending")}
+                status={`KYC ${String(org.verification_status || "pending")}`}
+                tone={
+                  org.verification_status === "approved"
+                    ? "teal"
+                    : org.verification_status === "rejected"
+                      ? "coral"
+                      : "gold"
+                }
               />
-              <StatusPill status={String(sub?.status || "—")} />
+              <EffectiveStatusPill status={status} />
+              {usage ? <SegmentPill segment={usage.segment} /> : null}
             </div>
+          </div>
+          <div className="text-right text-sm">
+            <p
+              className={cn(
+                "font-semibold",
+                endDays !== null && endDays <= 7 ? "text-coral" : "text-ink",
+              )}
+            >
+              {accessEnd ? `Access ends ${relativeDays(endDays)}` : "No end date"}
+            </p>
+            <p className="text-xs text-ink/50">
+              {accessEnd ? formatDateTime(accessEnd) : "—"}
+            </p>
           </div>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-gold/40 bg-gold/15 p-4">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">
-                Owner login
-              </p>
-              <p className="mt-1 break-all font-mono text-sm">
-                Email: <strong>{loginEmail || "—"}</strong>
-              </p>
-              <p className="mt-1 font-mono text-sm">
-                Password:{" "}
-                {visiblePassword ? (
-                  <strong>
-                    {showPassword ? visiblePassword : "••••••••••••"}
-                  </strong>
-                ) : (
-                  <span className="font-sans text-ink/55">
-                    Not stored here — owner still uses signup password. Reset to
-                    issue a password you can see and copy.
-                  </span>
-                )}
-              </p>
-              <p className="mt-1 text-[11px] text-ink/45">Login: /login</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {visiblePassword ? (
-                <>
-                  <button
-                    type="button"
-                    className="rounded-lg border border-ink/15 px-2.5 py-1.5 text-xs font-medium"
-                    onClick={() => setShowPassword((v) => !v)}
-                  >
-                    {showPassword ? "Hide" : "Show"}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-lg bg-ink px-2.5 py-1.5 text-xs font-medium text-stone"
-                    onClick={() =>
-                      void navigator.clipboard.writeText(
-                        `Aramis Product login\nEmail: ${loginEmail}\nPassword: ${visiblePassword}\nURL: ${window.location.origin}/login`,
-                      )
-                    }
-                  >
-                    Copy for SMS
-                  </button>
-                </>
-              ) : null}
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void resetPasswordHere()}
-                className="rounded-xl border border-ink/15 bg-white px-3 py-2 text-xs font-semibold"
-              >
-                Reset & show password
-              </button>
-            </div>
-          </div>
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Info
+            label="Monthly value"
+            value={
+              row.billing.monthlyEtb > 0
+                ? `${formatMoney(row.billing.monthlyEtb)}${row.billing.monthlySource === "catalog" ? " (list price)" : ""}`
+                : "—"
+            }
+          />
+          <Info
+            label="Lifetime paid"
+            value={formatMoney(row.billing.lifetimePaidEtb)}
+          />
+          <Info
+            label="Approved payments"
+            value={String(row.billing.approvedPayments)}
+          />
+          <Info
+            label="Last paid"
+            value={
+              row.billing.lastPaidAt
+                ? formatDateTime(row.billing.lastPaidAt)
+                : "never"
+            }
+          />
         </div>
 
-        <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink/50">
+            Restaurant details
+          </p>
+          <button
+            type="button"
+            onClick={() => setEditingProfile((v) => !v)}
+            className="rounded-lg border border-ink/15 px-2.5 py-1 text-xs font-medium"
+          >
+            {editingProfile ? "Close edit" : "Edit details"}
+          </button>
+        </div>
+
+        {editingProfile ? (
+          <OrgProfileEditor
+            key={String(org.updated_at || "")}
+            row={row}
+            busy={busy}
+            setBusy={setBusy}
+            setError={setError}
+            flashOk={flashOk}
+            onReload={onReload}
+            onDone={() => setEditingProfile(false)}
+          />
+        ) : null}
+
+        <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
           <Info label="Owner" value={String(row.owner?.full_name || "—")} />
           <Info label="Auth email" value={loginEmail || "—"} />
           <Info label="Owner phone" value={String(row.owner?.phone || "—")} />
@@ -215,7 +261,7 @@ export function RestaurantDetail({
             }
           />
           <Info
-            label="Period ends"
+            label="Paid access ends"
             value={
               sub?.current_period_end
                 ? formatDateTime(String(sub.current_period_end))
@@ -224,7 +270,11 @@ export function RestaurantDetail({
           />
           <Info
             label="Staff seats"
-            value={String(sub?.max_staff_seats ?? "—")}
+            value={`${includedSeats} included${extraSeats ? ` + ${extraSeats} extra` : ""} · ${seats || includedSeats + extraSeats} total`}
+          />
+          <Info
+            label="Public menu"
+            value={publicSlug ? `/m/${publicSlug}` : "not published"}
           />
           <Info
             label="Follow-up"
@@ -237,22 +287,22 @@ export function RestaurantDetail({
         </dl>
 
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          <button
-            type="button"
-            className="rounded-lg bg-stone px-2 py-1 underline disabled:opacity-40"
+          <ActionButton
+            className="rounded-lg bg-stone px-2 py-1 underline"
             disabled={!org.business_license_url}
-            onClick={() => onOpenDoc(org.business_license_url as string)}
+            pendingLabel="Opening…"
+            onAction={async () => onOpenDoc(org.business_license_url as string)}
           >
             License
-          </button>
-          <button
-            type="button"
-            className="rounded-lg bg-stone px-2 py-1 underline disabled:opacity-40"
+          </ActionButton>
+          <ActionButton
+            className="rounded-lg bg-stone px-2 py-1 underline"
             disabled={!org.id_document_url}
-            onClick={() => onOpenDoc(org.id_document_url as string)}
+            pendingLabel="Opening…"
+            onAction={async () => onOpenDoc(org.id_document_url as string)}
           >
             ID document
-          </button>
+          </ActionButton>
         </div>
 
         {org.admin_notes ? (
@@ -262,8 +312,66 @@ export function RestaurantDetail({
         ) : null}
       </section>
 
+      <OwnerLoginCard key={orgId} row={row} flashOk={flashOk} />
+
+      <UsagePanel
+        usage={usage}
+        dayKeys={usageDayKeys}
+        loading={usageLoading}
+        flags={flagsFromSub(sub)}
+        seats={seats}
+        ownerLastSignInAt={row.ownerLastSignInAt}
+      />
+
       <section className="rounded-3xl border border-ink/8 bg-white p-4 sm:p-5">
-        <h3 className="font-display text-lg">Access actions</h3>
+        <h3 className="font-display text-lg">Access, trial & public menu</h3>
+        <p className="mt-1 text-sm text-ink/55">
+          Pick an exact end date, or add days/months. One staff seat is included
+          per selected module; extra seats are a one-time add-on.
+        </p>
+        {mods.online ? (
+          <div className="mt-3 rounded-2xl bg-teal/10 p-3 text-sm">
+            <p className="text-xs font-semibold text-ink/60">Public menu URL</p>
+            <p className="mt-1 font-medium">
+              {publicSlug ? `/m/${publicSlug}` : "Not assigned yet"}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {publicSlug ? (
+                <a
+                  className="rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-teal underline"
+                  href={`/m/${publicSlug}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open public page
+                </a>
+              ) : null}
+              <ActionButton
+                pendingLabel="Publishing…"
+                className="rounded-lg bg-teal px-2.5 py-1 text-xs font-semibold text-white"
+                onAction={async () => {
+                  const res = await assignPublicSlugAction(
+                    orgId,
+                    String(org.name),
+                    Boolean(publicSlug),
+                  );
+                  throwIfError(res, "Could not publish URL");
+                  if ("slug" in res) {
+                    await flashOk(`Public menu at /m/${res.slug}`);
+                  }
+                  await onReload();
+                }}
+              >
+                {publicSlug ? "Regenerate slug" : "Publish public URL"}
+              </ActionButton>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-3 text-xs text-ink/45">
+            Enable Website & public ordering to publish /m/{"{slug}"} for guest
+            orders.
+          </p>
+        )}
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
           <div className="space-y-2 rounded-2xl bg-stone/40 p-3">
             <p className="text-xs font-semibold text-ink/60">Start trial</p>
@@ -298,6 +406,22 @@ export function RestaurantDetail({
             </div>
             <ModuleCheckboxes value={mods} onChange={setMods} dense />
             <label className="block text-xs">
+              Extra staff seats (one-time)
+              <input
+                type="number"
+                min={0}
+                className="field mt-1"
+                value={extraSeats}
+                onChange={(e) =>
+                  setExtraSeats(Math.max(0, Number(e.target.value) || 0))
+                }
+              />
+              <span className="mt-1 block text-[10px] text-ink/40">
+                {includedSeats} included from modules
+                {extraSeats ? ` + ${extraSeats} extra` : ""}
+              </span>
+            </label>
+            <label className="block text-xs">
               Package
               <select
                 className="field mt-1"
@@ -317,44 +441,40 @@ export function RestaurantDetail({
                 ))}
               </select>
             </label>
-            <button
-              type="button"
-              disabled={busy}
+            <ActionButton
+              pendingLabel="Starting…"
               className="rounded-xl bg-teal px-3 py-2 text-xs font-semibold text-white"
-              onClick={() => {
-                void (async () => {
-                  setBusy(true);
-                  const res = await startTrialAction({
-                    organizationId: orgId,
-                    trialDays,
-                    trialMonths: trialMonths || undefined,
-                    trialEndsAt: fromDatetimeLocalValue(trialEndsLocal),
-                    menuEnabled: mods.menu,
-                    orderingEnabled: mods.ordering,
-                    kitchenEnabled: mods.kitchen,
-                    inventoryEnabled: mods.inventory,
-                    financeEnabled: mods.finance,
-                    hrEnabled: mods.hr,
-                    packageCode: pkgCode || null,
-                    issuePassword: false,
-                    notes: "Trial started from restaurant detail",
-                    followUpAt: fromDatetimeLocalValue(followUpLocal),
-                    followUpNote: followUpNote || undefined,
-                  });
-                  setBusy(false);
-                  if ("error" in res) {
-                    setError(String(res.error ?? "Failed"));
-                    return;
-                  }
+              onAction={async () => {
+                const res = await startTrialAction({
+                  organizationId: orgId,
+                  trialDays,
+                  trialMonths: trialMonths || undefined,
+                  trialEndsAt: fromDatetimeLocalValue(trialEndsLocal),
+                  menuEnabled: mods.menu,
+                  orderingEnabled: mods.ordering,
+                  kitchenEnabled: mods.kitchen,
+                  inventoryEnabled: mods.inventory,
+                  financeEnabled: mods.finance,
+                  hrEnabled: mods.hr,
+                  onlineEnabled: mods.online,
+                  extraStaffSeats: extraSeats,
+                  packageCode: pkgCode || null,
+                  issuePassword: false,
+                  notes: "Trial started from restaurant detail",
+                  followUpAt: fromDatetimeLocalValue(followUpLocal),
+                  followUpNote: followUpNote || undefined,
+                });
+                throwIfError(res, "Failed");
+                if ("trialEndsAt" in res) {
                   await flashOk(
-                    `Trial started · ends ${formatDateTime(res.trialEndsAt)}`,
+                    `Trial started · ends ${formatDateTime(String(res.trialEndsAt))}`,
                   );
-                  await onReload();
-                })();
+                }
+                await onReload();
               }}
             >
               Start trial
-            </button>
+            </ActionButton>
           </div>
 
           <div className="space-y-2 rounded-2xl bg-stone/40 p-3">
@@ -377,36 +497,30 @@ export function RestaurantDetail({
               value={extendDays}
               onChange={(e) => setExtendDays(Number(e.target.value) || 1)}
             />
-            <button
-              type="button"
-              disabled={busy}
+            <ActionButton
+              pendingLabel="Saving…"
               className="rounded-xl bg-ink px-3 py-2 text-xs font-semibold text-stone"
-              onClick={() => {
-                void (async () => {
-                  setBusy(true);
-                  const res = await extendTrialAction({
-                    organizationId: orgId,
-                    endsAt: fromDatetimeLocalValue(extendEndsLocal),
-                    addDays: extendEndsLocal ? undefined : extendDays,
-                    followUpAt: fromDatetimeLocalValue(followUpLocal),
-                    followUpNote: followUpNote || undefined,
-                  });
-                  setBusy(false);
-                  if ("error" in res) {
-                    setError(String(res.error ?? "Failed"));
-                    return;
-                  }
+              onAction={async () => {
+                const res = await extendTrialAction({
+                  organizationId: orgId,
+                  endsAt: fromDatetimeLocalValue(extendEndsLocal),
+                  addDays: extendEndsLocal ? undefined : extendDays,
+                  followUpAt: fromDatetimeLocalValue(followUpLocal),
+                  followUpNote: followUpNote || undefined,
+                });
+                throwIfError(res, "Failed");
+                if ("trialEndsAt" in res) {
                   await flashOk(
-                    `Trial ends ${formatDateTime(res.trialEndsAt)}`,
+                    `Trial ends ${formatDateTime(String(res.trialEndsAt))}`,
                   );
-                  await onReload();
-                })();
+                }
+                await onReload();
               }}
             >
               {extendEndsLocal
                 ? "Set trial end date"
                 : `Extend +${extendDays} days`}
-            </button>
+            </ActionButton>
           </div>
 
           <div className="space-y-2 rounded-2xl bg-stone/40 p-3">
@@ -436,92 +550,84 @@ export function RestaurantDetail({
                 </option>
               ))}
             </select>
-            <button
-              type="button"
-              disabled={busy}
+            <ActionButton
+              pendingLabel="Saving…"
               className="rounded-xl bg-teal px-3 py-2 text-xs font-semibold text-white"
-              onClick={() => {
-                void (async () => {
-                  setBusy(true);
-                  const res = await grantPaidMonthsAction({
-                    organizationId: orgId,
-                    months: grantEndsLocal ? undefined : grantMonths,
-                    periodEndsAt: fromDatetimeLocalValue(grantEndsLocal),
-                    menuEnabled: mods.menu,
-                    orderingEnabled: mods.ordering,
-                    kitchenEnabled: mods.kitchen,
-                    inventoryEnabled: mods.inventory,
-                    financeEnabled: mods.finance,
-                    hrEnabled: mods.hr,
-                    packageCode: pkgCode || null,
-                    followUpAt: fromDatetimeLocalValue(followUpLocal),
-                    followUpNote: followUpNote || undefined,
-                  });
-                  setBusy(false);
-                  if ("error" in res) {
-                    setError(String(res.error ?? "Failed"));
-                    return;
-                  }
+              onAction={async () => {
+                const res = await grantPaidMonthsAction({
+                  organizationId: orgId,
+                  months: grantEndsLocal ? undefined : grantMonths,
+                  periodEndsAt: fromDatetimeLocalValue(grantEndsLocal),
+                  menuEnabled: mods.menu,
+                  orderingEnabled: mods.ordering,
+                  kitchenEnabled: mods.kitchen,
+                  inventoryEnabled: mods.inventory,
+                  financeEnabled: mods.finance,
+                  hrEnabled: mods.hr,
+                  onlineEnabled: mods.online,
+                  extraStaffSeats: extraSeats,
+                  packageCode: pkgCode || null,
+                  followUpAt: fromDatetimeLocalValue(followUpLocal),
+                  followUpNote: followUpNote || undefined,
+                });
+                throwIfError(res, "Failed");
+                if ("periodEnd" in res) {
                   await flashOk(
-                    `Paid until ${formatDateTime(res.periodEnd)}`,
+                    `Paid until ${formatDateTime(String(res.periodEnd))}`,
                   );
-                  await onReload();
-                })();
+                }
+                await onReload();
               }}
             >
               {grantEndsLocal ? "Set paid end date" : "Grant months"}
-            </button>
+            </ActionButton>
           </div>
 
           <div className="space-y-2 rounded-2xl bg-stone/40 p-3">
             <p className="text-xs font-semibold text-ink/60">Expire / cancel</p>
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={busy}
+              <ActionButton
+                pendingLabel="Expiring…"
                 className="rounded-xl border border-coral/30 bg-coral/10 px-3 py-2 text-xs font-semibold text-coral"
-                onClick={() => {
-                  void (async () => {
-                    setBusy(true);
-                    const res = await expireAccessAction({
-                      organizationId: orgId,
-                      mode: "expired",
-                    });
-                    setBusy(false);
-                    if ("error" in res) {
-                      setError(String(res.error ?? "Failed"));
-                      return;
-                    }
-                    await flashOk("Access expired");
-                    await onReload();
-                  })();
+                onAction={async () => {
+                  if (
+                    !window.confirm(
+                      `Expire access for ${String(org.name)}? Their staff lose access immediately.`,
+                    )
+                  )
+                    return;
+                  const res = await expireAccessAction({
+                    organizationId: orgId,
+                    mode: "expired",
+                  });
+                  throwIfError(res, "Failed");
+                  await flashOk("Access expired");
+                  await onReload();
                 }}
               >
                 Expire access
-              </button>
-              <button
-                type="button"
-                disabled={busy}
+              </ActionButton>
+              <ActionButton
+                pendingLabel="Canceling…"
                 className="rounded-xl border border-coral/30 px-3 py-2 text-xs font-semibold text-coral"
-                onClick={() => {
-                  void (async () => {
-                    setBusy(true);
-                    const res = await expireAccessAction({
-                      organizationId: orgId,
-                      mode: "canceled",
-                    });
-                    setBusy(false);
-                    if ("error" in res) {
-                      setError(String(res.error ?? "Failed"));
-                      return;
-                    }
-                    await flashOk("Subscription canceled");
-                    await onReload();
-                  })();
+                onAction={async () => {
+                  if (
+                    !window.confirm(
+                      `Cancel the subscription for ${String(org.name)}? Their staff lose access immediately.`,
+                    )
+                  )
+                    return;
+                  const res = await expireAccessAction({
+                    organizationId: orgId,
+                    mode: "canceled",
+                  });
+                  throwIfError(res, "Failed");
+                  await flashOk("Subscription canceled");
+                  await onReload();
                 }}
               >
                 Cancel
-              </button>
+              </ActionButton>
             </div>
           </div>
         </div>
@@ -550,92 +656,67 @@ export function RestaurantDetail({
             onChange={(e) => setFollowUpNote(e.target.value)}
           />
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={busy || !followUpLocal}
-              className="rounded-xl bg-ink px-3 py-2 text-xs font-semibold text-stone disabled:opacity-50"
-              onClick={() => {
-                void (async () => {
-                  const at = fromDatetimeLocalValue(followUpLocal);
-                  if (!at) {
-                    setError("Pick a follow-up date/time");
-                    return;
-                  }
-                  setBusy(true);
-                  const res = await setFollowUpAction({
-                    organizationId: orgId,
-                    followUpAt: at,
-                    followUpNote: followUpNote || null,
-                  });
-                  setBusy(false);
-                  if ("error" in res) {
-                    setError(String(res.error ?? "Failed"));
-                    return;
-                  }
-                  await flashOk("Follow-up saved");
-                  await onReload();
-                })();
+            <ActionButton
+              disabled={!followUpLocal}
+              pendingLabel="Saving…"
+              className="rounded-xl bg-ink px-3 py-2 text-xs font-semibold text-stone"
+              onAction={async () => {
+                const at = fromDatetimeLocalValue(followUpLocal);
+                if (!at) throw new Error("Pick a follow-up date/time");
+                const res = await setFollowUpAction({
+                  organizationId: orgId,
+                  followUpAt: at,
+                  followUpNote: followUpNote || null,
+                });
+                throwIfError(res, "Failed");
+                await flashOk("Follow-up saved");
+                await onReload();
               }}
             >
               Save follow-up
-            </button>
-            <button
-              type="button"
-              disabled={busy}
+            </ActionButton>
+            <ActionButton
+              pendingLabel="Clearing…"
               className="rounded-xl border border-ink/15 px-3 py-2 text-xs font-semibold"
-              onClick={() => {
-                void (async () => {
-                  setBusy(true);
-                  const res = await setFollowUpAction({
-                    organizationId: orgId,
-                    followUpAt: null,
-                  });
-                  setBusy(false);
-                  if ("error" in res) {
-                    setError(String(res.error ?? "Failed"));
-                    return;
-                  }
-                  setFollowUpLocal("");
-                  setFollowUpNote("");
-                  await flashOk("Follow-up cleared");
-                  await onReload();
-                })();
+              onAction={async () => {
+                const res = await setFollowUpAction({
+                  organizationId: orgId,
+                  followUpAt: null,
+                });
+                throwIfError(res, "Failed");
+                setFollowUpLocal("");
+                setFollowUpNote("");
+                await flashOk("Follow-up cleared");
+                await onReload();
               }}
             >
               Clear / done
-            </button>
+            </ActionButton>
           </div>
         </div>
 
-        <form
+        <AsyncForm
+          key={String(sub?.updated_at || "")}
           className="mt-4 space-y-3 rounded-2xl border border-ink/8 p-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            void (async () => {
-              setBusy(true);
-              const res = await updateTenantSubscriptionAction({
-                organizationId: orgId,
-                status: String(fd.get("status")) as SubStatus,
-                menuEnabled: mods.menu,
-                orderingEnabled: mods.ordering,
-                kitchenEnabled: mods.kitchen,
-                inventoryEnabled: mods.inventory,
-                financeEnabled: mods.finance,
-                hrEnabled: mods.hr,
-                trialDays: Number(fd.get("trialDays") || 14),
-                periodMonths: Number(fd.get("periodMonths") || 0),
-                maxStaffSeats: Number(fd.get("maxStaffSeats") || 2),
-                notes: String(fd.get("notes") || ""),
-              });
-              setBusy(false);
-              if ("error" in res) {
-                setError(String(res.error ?? "Update failed"));
-                return;
-              }
-              await flashOk("Subscription updated");
-              await onReload();
-            })();
+          onSubmitAsync={async (fd) => {
+            const res = await updateTenantSubscriptionAction({
+              organizationId: orgId,
+              status: String(fd.get("status")) as SubStatus,
+              menuEnabled: mods.menu,
+              orderingEnabled: mods.ordering,
+              kitchenEnabled: mods.kitchen,
+              inventoryEnabled: mods.inventory,
+              financeEnabled: mods.finance,
+              hrEnabled: mods.hr,
+              onlineEnabled: mods.online,
+              extraStaffSeats: extraSeats,
+              trialDays: Number(fd.get("trialDays") || 14),
+              periodMonths: Number(fd.get("periodMonths") || 0),
+              notes: String(fd.get("notes") || ""),
+            });
+            throwIfError(res, "Update failed");
+            await flashOk("Subscription updated");
+            await onReload();
           }}
         >
           <p className="text-xs font-semibold text-ink/60">Edit subscription</p>
@@ -666,10 +747,15 @@ export function RestaurantDetail({
               <option value="12">+12 months</option>
             </select>
             <input
-              name="maxStaffSeats"
+              name="extraStaffSeats"
               type="number"
+              min={0}
               className="field"
-              defaultValue={Number(sub?.max_staff_seats ?? 2)}
+              value={extraSeats}
+              onChange={(e) =>
+                setExtraSeats(Math.max(0, Number(e.target.value) || 0))
+              }
+              title="Extra staff seats"
             />
           </div>
           <ModuleCheckboxes value={mods} onChange={setMods} />
@@ -679,14 +765,13 @@ export function RestaurantDetail({
             defaultValue={String(sub?.notes || "")}
             placeholder="Notes"
           />
-          <button
-            type="submit"
-            disabled={busy}
+          <SubmitButton
+            pendingLabel="Saving…"
             className="rounded-xl bg-ink px-4 py-2 text-xs font-semibold text-stone"
           >
             Save subscription
-          </button>
-        </form>
+          </SubmitButton>
+        </AsyncForm>
 
         <div className="mt-3 flex gap-2">
           <input
@@ -695,59 +780,188 @@ export function RestaurantDetail({
             onChange={(e) => setNote(e.target.value)}
             placeholder="Add admin note"
           />
-          <button
-            type="button"
-            disabled={busy || !note.trim()}
+          <ActionButton
+            disabled={!note.trim()}
+            pendingLabel="Adding…"
             className="rounded-xl border border-ink/15 px-3 py-2 text-xs font-semibold"
-            onClick={() => {
-              void (async () => {
-                setBusy(true);
-                const res = await addAdminNoteAction({
-                  organizationId: orgId,
-                  note,
-                });
-                setBusy(false);
-                if ("error" in res) {
-                  setError(String(res.error ?? "Failed"));
-                  return;
-                }
-                setNote("");
-                await flashOk("Note added");
-                await onReload();
-              })();
+            onAction={async () => {
+              const res = await addAdminNoteAction({
+                organizationId: orgId,
+                note,
+              });
+              throwIfError(res, "Failed");
+              setNote("");
+              await flashOk("Note added");
+              await onReload();
             }}
           >
             Add note
-          </button>
+          </ActionButton>
         </div>
       </section>
 
-      <section className="rounded-3xl border border-ink/8 bg-white p-4 sm:p-5">
-        <h3 className="font-display text-lg">Payment proofs</h3>
-        <ul className="mt-3 space-y-2">
-          {proofs.map((p) => (
-            <li
-              key={p.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-stone/40 px-3 py-2 text-sm"
-            >
-              <span>
-                {formatMoney(Number(p.amount))}
-                {p.expected_amount_etb != null
-                  ? ` (exp ${formatMoney(Number(p.expected_amount_etb))})`
-                  : ""}{" "}
-                · {String(p.months_requested || 1)} mo · {String(p.method)}
-                {p.package_code ? ` · ${String(p.package_code)}` : ""}
-              </span>
-              <StatusPill status={String(p.status)} />
-            </li>
-          ))}
-          {proofs.length === 0 ? (
-            <li className="py-4 text-center text-sm text-ink/45">
-              No proofs for this restaurant
-            </li>
-          ) : null}
-        </ul>
-      </section>
+      <PaymentRecords
+        organizationId={orgId}
+        proofs={proofs}
+        packages={packages}
+        busy={busy}
+        setBusy={setBusy}
+        setError={setError}
+        flashOk={flashOk}
+        onChanged={onReload}
+      />
+
+      <StaffManager
+        organizationId={orgId}
+        seats={seats}
+        busy={busy}
+        setBusy={setBusy}
+        setError={setError}
+        flashOk={flashOk}
+      />
+
+      <DangerZone
+        organizationId={orgId}
+        organizationName={String(org.name)}
+        busy={busy}
+        setBusy={setBusy}
+        setError={setError}
+        flashOk={flashOk}
+        onReload={onReload}
+        onDeleted={onDeleted}
+      />
     </div>
+  );
+}
+
+function UsagePanel({
+  usage,
+  dayKeys,
+  loading,
+  flags,
+  seats,
+  ownerLastSignInAt,
+}: {
+  usage: TenantUsage | undefined;
+  dayKeys: string[];
+  loading: boolean;
+  flags: ModuleState;
+  seats: number;
+  ownerLastSignInAt: string | null;
+}) {
+  if (!usage) {
+    if (loading) return <SectionShimmer variant="usage" />;
+    return (
+      <section className="rounded-3xl border border-ink/8 bg-white p-4 text-sm text-ink/50 sm:p-5">
+        No usage data for this restaurant yet.
+      </section>
+    );
+  }
+  const lastOrder = daysSince(usage.lastOrderAt);
+  const signIn = daysSince(ownerLastSignInAt);
+  const labels = dayKeys.map((k) =>
+    new Date(`${k}T12:00:00`).toLocaleDateString("en", {
+      month: "short",
+      day: "numeric",
+    }),
+  );
+
+  return (
+    <section className="rounded-3xl border border-ink/8 bg-white p-4 sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-display text-lg">Usage · last 30 days</h3>
+        <span className="flex items-center gap-2">
+          <SegmentPill segment={usage.segment} />
+          <ScoreBar score={usage.score} />
+        </span>
+      </div>
+
+      <dl className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:grid-cols-6">
+        <div className="rounded-xl bg-stone/50 px-3 py-2">
+          <dt className="text-[11px] text-ink/50">Orders</dt>
+          <dd className="mt-0.5 font-medium">
+            {usage.orders30d}{" "}
+            <TrendBadge current={usage.orders30d} previous={usage.ordersPrev30d} />
+          </dd>
+        </div>
+        <Info label="Paid sales" value={formatMoney(usage.sales30d)} />
+        <Info label="Active days" value={`${usage.activeDays30d} / 30`} />
+        <Info label="Orders last 7d" value={String(usage.orders7d)} />
+        <Info
+          label="Last order"
+          value={lastOrder === null ? "none in 60 days" : relativeDays(-lastOrder)}
+        />
+        <Info
+          label="Owner last sign-in"
+          value={signIn === null ? "never" : relativeDays(-signIn)}
+        />
+      </dl>
+
+      <div className="mt-4">
+        <SparkLines
+          labels={labels}
+          series={[
+            {
+              key: "sales",
+              label: "Paid sales",
+              values: usage.dailySales,
+              color: "#0f766e",
+            },
+          ]}
+          details={usage.dailyOrders.map((orders) => ({ orders }))}
+          height={160}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr]">
+        <div>
+          <p className="text-xs font-semibold text-ink/60">Module adoption</p>
+          <ul className="mt-2 grid gap-1 sm:grid-cols-2">
+            {MODULES.map((m) => {
+              const enabled = flags[m];
+              const hint = MODULE_USAGE_HINT[m];
+              const used = usage.modulesUsed.includes(m);
+              return (
+                <li
+                  key={m}
+                  title={hint ? `Counted as used when it ${hint}` : undefined}
+                  className={cn(
+                    "flex items-center justify-between rounded-xl px-3 py-1.5 text-xs",
+                    !enabled
+                      ? "bg-stone/30 text-ink/35"
+                      : used
+                        ? "bg-teal/10 text-teal"
+                        : "bg-coral/10 text-coral",
+                  )}
+                >
+                  <span className="font-medium">{APP_MODULE_LABELS[m]}</span>
+                  <span>
+                    {!enabled
+                      ? "not in plan"
+                      : !hint
+                        ? "enabled"
+                        : used
+                          ? "in use"
+                          : "paid for, not used"}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-sm">
+          <Info
+            label="Staff seats"
+            value={`${usage.staffActive} / ${seats || "—"}${seats > 0 && usage.staffActive >= seats ? " · full (upsell)" : ""}`}
+          />
+          <Info label="Menu items" value={String(usage.menuItems)} />
+          <Info label="Inventory items" value={String(usage.inventoryItems)} />
+          <Info
+            label="Day closes (30d)"
+            value={String(usage.dayCloses30d)}
+          />
+        </div>
+      </div>
+    </section>
   );
 }

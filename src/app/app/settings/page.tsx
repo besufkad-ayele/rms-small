@@ -9,7 +9,11 @@ export default function SettingsPage() {
     <RequireAccess>
       <Suspense
         fallback={
-          <div className="h-40 animate-pulse rounded-3xl bg-ink/5" />
+          <div className="space-y-3">
+            <div className="shimmer h-10 w-56 rounded-2xl" />
+            <div className="shimmer h-40 rounded-3xl" />
+            <div className="shimmer h-24 rounded-3xl" />
+          </div>
         }
       >
         <SettingsPanel />

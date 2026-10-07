@@ -44,22 +44,41 @@ body {
   font-family: var(--font-dm-sans), system-ui, sans-serif;
 }
 
+.safe-pb {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.safe-pt {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
 .font-display {
   font-family: var(--font-fraunces), Georgia, serif;
 }
 
-.field {
-  width: 100%;
-  border-radius: 0.75rem;
-  border: 1px solid color-mix(in oklab, var(--ink) 12%, transparent);
-  background: var(--paper);
-  color: var(--ink);
-  padding: 0.625rem 0.75rem;
-  outline: none;
-}
+/* In the components layer so width/padding utilities (w-auto, max-w-*) can override. */
+@layer components {
+  .field {
+    width: 100%;
+    border-radius: 0.75rem;
+    border: 1px solid color-mix(in oklab, var(--ink) 12%, transparent);
+    background: var(--paper);
+    color: var(--ink);
+    padding: 0.625rem 0.75rem;
+    outline: none;
+  }
 
-.field:focus {
-  box-shadow: 0 0 0 2px color-mix(in oklab, var(--teal) 45%, transparent);
+  .field:focus {
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--teal) 45%, transparent);
+  }
+
+  .field-compact {
+    width: auto;
+    min-width: 10.5rem;
+    max-width: 100%;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
 }
 
 /*
@@ -104,4 +123,53 @@ html.dark :where(.bg-stone\/40, .bg-stone\/50, .bg-stone\/60, .bg-stone\/70) {
   .no-print {
     display: none !important;
   }
+}
+
+@keyframes shimmer-slide {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.shimmer {
+  background-color: color-mix(in oklab, var(--ink) 6%, var(--paper));
+  background-image: linear-gradient(
+    105deg,
+    transparent 0%,
+    color-mix(in oklab, var(--ink) 4%, transparent) 38%,
+    color-mix(in oklab, var(--paper) 88%, white) 50%,
+    color-mix(in oklab, var(--ink) 4%, transparent) 62%,
+    transparent 100%
+  );
+  background-size: 220% 100%;
+  animation: shimmer-slide 1.35s ease-in-out infinite;
+}
+
+html.dark .shimmer {
+  background-color: color-mix(in oklab, var(--ink) 10%, var(--paper));
+  background-image: linear-gradient(
+    105deg,
+    transparent 0%,
+    color-mix(in oklab, var(--ink) 8%, transparent) 38%,
+    color-mix(in oklab, var(--paper) 70%, white) 50%,
+    color-mix(in oklab, var(--ink) 8%, transparent) 62%,
+    transparent 100%
+  );
+}
+
+.shimmer-on-dark {
+  background-color: rgba(255, 255, 255, 0.08);
+  background-image: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.04) 38%,
+    rgba(255, 255, 255, 0.22) 50%,
+    rgba(255, 255, 255, 0.04) 62%,
+    transparent 100%
+  );
+  background-size: 220% 100%;
+  animation: shimmer-slide 1.35s ease-in-out infinite;
 }

@@ -88,6 +88,7 @@ interface AuthState {
     orderingEnabled?: boolean;
     kitchenEnabled?: boolean;
     hrEnabled?: boolean;
+    onlineEnabled?: boolean;
     licenseFile?: File | null;
     idFile?: File | null;
   }) => Promise<string | null>;
@@ -99,6 +100,8 @@ interface AuthState {
     file: File;
     monthsRequested?: number;
     modules?: Partial<ModuleFlags>;
+    extraStaffSeats?: number;
+    addonCodes?: string[];
     packageCode?: string | null;
     expectedAmountEtb?: number | null;
     amountBreakdown?: Record<string, unknown> | null;
@@ -297,6 +300,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       orderingEnabled?: boolean;
       kitchenEnabled?: boolean;
       hrEnabled?: boolean;
+      onlineEnabled?: boolean;
       licenseFile?: File | null;
       idFile?: File | null;
     }) => {
@@ -334,6 +338,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       file: File;
       monthsRequested?: number;
       modules?: Partial<ModuleFlags>;
+      extraStaffSeats?: number;
+      addonCodes?: string[];
       packageCode?: string | null;
       expectedAmountEtb?: number | null;
       amountBreakdown?: Record<string, unknown> | null;
@@ -347,6 +353,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         file: input.file,
         monthsRequested: input.monthsRequested,
         modules: input.modules,
+        extraStaffSeats: input.extraStaffSeats,
+        addonCodes: input.addonCodes,
         packageCode: input.packageCode,
         expectedAmountEtb: input.expectedAmountEtb,
         amountBreakdown: input.amountBreakdown,
@@ -412,6 +420,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       if (module === "hr") {
         return checkFeature(tenant.membership, "staff");
+      }
+      if (module === "online") {
+        return true;
       }
       return false;
     },

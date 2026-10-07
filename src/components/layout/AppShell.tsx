@@ -6,6 +6,7 @@ import {
   BarChart3,
   ChefHat,
   ClipboardList,
+  Globe,
   LayoutGrid,
   LogOut,
   Menu,
@@ -57,6 +58,7 @@ export function AppShell({
     tenant,
     logout,
     hasFeature,
+    hasModule,
     daysLeft,
     warningLevel,
     accessBlocked,
@@ -100,6 +102,15 @@ export function AppShell({
     },
     ...(hasFeature("staff")
       ? [{ href: "/app/staff", label: "Staff", icon: Users }]
+      : []),
+    ...(hasModule("online") && tenant?.organization.public_slug
+      ? [
+          {
+            href: `/m/${tenant.organization.public_slug}`,
+            label: "Public menu",
+            icon: Globe,
+          },
+        ]
       : []),
     ...(isPlatformAdmin
       ? [{ href: "/platform", label: "Platform", icon: LayoutGrid }]

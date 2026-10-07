@@ -6,7 +6,10 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { listOrgPaymentProofs } from "@/lib/cloud-auth";
 import {
   calculateAmount,
+  extraSeatUnitPrice,
+  includedSeatsFromFlags,
   packageModuleFlags,
+  type AddonRow,
   type ModulePriceRow,
   type PackageRow,
 } from "@/lib/pricing";
@@ -25,6 +28,7 @@ const MODULES: AppModule[] = [
   "inventory",
   "finance",
   "hr",
+  "online",
 ];
 
 const MODULE_HINTS: Record<AppModule, string> = {
@@ -33,7 +37,8 @@ const MODULE_HINTS: Record<AppModule, string> = {
   kitchen: "Kitchen display & prep status",
   inventory: "Stock, suppliers & movements",
   finance: "Reports & day close",
-  hr: "Staff seats & permissions",
+  hr: "Staff permissions",
+  online: "Public menu page and guest orders",
 };
 
 type ModuleState = Record<AppModule, boolean>;
@@ -47,6 +52,7 @@ function flagsFromSub(
     | "ordering_enabled"
     | "kitchen_enabled"
     | "hr_enabled"
+    | "online_enabled"
   >,
 ): ModuleState {
   const inv = sub.inventory_enabled;
@@ -58,6 +64,7 @@ function flagsFromSub(
     inventory: inv,
     finance: sub.finance_enabled,
     hr: sub.hr_enabled ?? true,
+    online: Boolean(sub.online_enabled),
   };
 }
 
@@ -82,6 +89,9 @@ export function BillingPanel() {
   );
   const [packages, setPackages] = useState<PackageRow[]>([]);
   const [modulePrices, setModulePrices] = useState<ModulePriceRow[]>([]);
+  const [addons, setAddons] = useState<AddonRow[]>([]);
+  const [addonCodes, setAddonCodes] = useState<string[]>([]);
+  const [extraSeats, setExtraSeats] = useState(0);
   const [selectedPackage, setSelectedPackage] = useState<string>("");
   const [months, setMonths] = useState(1);
   const [amountOverride, setAmountOverride] = useState<string | null>(null);
@@ -107,6 +117,7 @@ export function BillingPanel() {
       }
       setPackages(res.packages);
       setModulePrices(res.modulePrices);
+      setAddons("addons" in res ? res.addons || [] : []);
       setCatalogError(null);
     })();
   }, []);
@@ -117,10 +128,13 @@ export function BillingPanel() {
         months,
         packages,
         modulePrices,
+        addons,
         packageCode: selectedPackage || null,
         modules: payMods,
+        addonCodes,
+        extraSeats,
       }),
-    [months, packages, modulePrices, selectedPackage, payMods],
+    [months, packages, modulePrices, addons, selectedPackage, payMods, addonCodes, extraSeats],
   );
 
   const displayAmount =
@@ -192,8 +206,11 @@ export function BillingPanel() {
         inventoryEnabled: modulesForSubmit.inventory,
         financeEnabled: modulesForSubmit.finance,
         hrEnabled: modulesForSubmit.hr,
+        onlineEnabled: modulesForSubmit.online,
       },
       packageCode: selectedPackage || null,
+      extraStaffSeats: extraSeats,
+      addonCodes,
       expectedAmountEtb: breakdown.total_etb,
       amountBreakdown: breakdown,
     });
@@ -290,6 +307,37 @@ export function BillingPanel() {
             <dt className="text-xs text-ink/50">Plan</dt>
             <dd className="mt-1 font-semibold">{sub.plan_code}</dd>
           </div>
+          <div className="rounded-2xl bg-stone/60 px-3 py-3 sm:col-span-2">
+            <dt className="text-xs text-ink/50">Staff seats</dt>
+            <dd className="mt-1 font-semibold">
+              {includedSeatsFromFlags(mods)} included
+              {Number(sub.extra_staff_seats || 0)
+                ? ` + ${sub.extra_staff_seats} extra`
+                : ""}{" "}
+              · {Number(sub.max_staff_seats || includedSeatsFromFlags(mods))} total
+            </dd>
+          </div>
+          {mods.online ? (
+            <div className="rounded-2xl bg-teal/10 px-3 py-3 sm:col-span-2">
+              <dt className="text-xs text-ink/50">Public menu</dt>
+              <dd className="mt-1 text-sm">
+                {tenant.organization.public_slug ? (
+                  <a
+                    className="font-semibold text-teal underline"
+                    href={`/m/${tenant.organization.public_slug}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    /m/{tenant.organization.public_slug}
+                  </a>
+                ) : (
+                  <span className="text-ink/55">
+                    Ask Aramis to publish your public menu URL.
+                  </span>
+                )}
+              </dd>
+            </div>
+          ) : null}
         </dl>
       </section>
 
@@ -451,6 +499,62 @@ export function BillingPanel() {
             </div>
           )}
 
+          <div className="rounded-2xl bg-stone/40 p-3 text-sm">
+            <p className="font-medium text-ink/70">
+              Staff seats: {breakdown.included_seats} included
+              {extraSeats ? ` + ${extraSeats} extra` : ""}
+            </p>
+            <p className="text-xs text-ink/50">
+              One seat per selected module. Extra seats are a one-time fee of{" "}
+              {formatMoney(extraSeatUnitPrice(addons))} each.
+            </p>
+            <label className="mt-2 block text-xs text-ink/60">
+              Extra seats
+              <input
+                type="number"
+                min={0}
+                className="field mt-1"
+                value={extraSeats}
+                onChange={(e) => {
+                  setExtraSeats(Math.max(0, Number(e.target.value) || 0));
+                  setAmountOverride(null);
+                }}
+              />
+            </label>
+            <div className="mt-2 space-y-1">
+              {addons
+                .filter((a) => a.code !== "extra_seat")
+                .map((a) => (
+                  <label key={a.code} className="flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={addonCodes.includes(a.code)}
+                      onChange={(e) => {
+                        setAddonCodes((prev) =>
+                          e.target.checked
+                            ? [...prev, a.code]
+                            : prev.filter((c) => c !== a.code),
+                        );
+                        setAmountOverride(null);
+                      }}
+                    />
+                    <span>
+                      <span className="font-medium">{a.name}</span>
+                      <span className="ml-1 text-teal">
+                        {formatMoney(Number(a.price_etb))} one-time
+                      </span>
+                      {a.description ? (
+                        <span className="block text-xs text-ink/50">
+                          {a.description}
+                        </span>
+                      ) : null}
+                    </span>
+                  </label>
+                ))}
+            </div>
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label className="block text-sm">
               <span className="mb-1 block text-ink/60">Months</span>
@@ -499,14 +603,17 @@ export function BillingPanel() {
 
           <div className="rounded-2xl border border-teal/25 bg-teal/5 px-4 py-3">
             <p className="font-display text-lg text-ink">
-              You will pay {formatMoney(breakdown.total_etb)} for {months}{" "}
-              month{months > 1 ? "s" : ""}
+              You will pay {formatMoney(breakdown.total_etb)}
+              {breakdown.one_time_etb
+                ? ` (${formatMoney(breakdown.monthly_total_etb * months)} for ${months} month${months > 1 ? "s" : ""} + ${formatMoney(breakdown.one_time_etb)} one-time)`
+                : ` for ${months} month${months > 1 ? "s" : ""}`}
             </p>
             <ul className="mt-2 space-y-1 text-xs text-ink/60">
               {breakdown.line_items.map((l) => (
                 <li key={l.code}>
-                  {l.label}: {formatMoney(l.monthly_etb)}/mo × {months} ={" "}
-                  {formatMoney(l.monthly_etb * months)}
+                  {l.one_time_etb
+                    ? `${l.label}: ${formatMoney(l.one_time_etb)} one-time`
+                    : `${l.label}: ${formatMoney(l.monthly_etb)}/mo × ${months} = ${formatMoney(l.monthly_etb * months)}`}
                 </li>
               ))}
               {breakdown.line_items.length === 0 ? (

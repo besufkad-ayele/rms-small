@@ -4,7 +4,8 @@ export type AppModule =
   | "kitchen"
   | "inventory"
   | "finance"
-  | "hr";
+  | "hr"
+  | "online";
 export type OrgType = "cafe" | "restaurant" | "other";
 export type MemberRole = "owner" | "manager" | "cashier" | "waiter";
 
@@ -125,6 +126,8 @@ export interface Organization {
   verified_at?: string | null;
   verified_by?: string | null;
   admin_notes?: string | null;
+  /** Public menu / guest-order path: /m/{public_slug} */
+  public_slug?: string | null;
   created_by: string | null;
   created_at: string;
   /** Last password issued by platform reset (not the signup password). */
@@ -158,14 +161,17 @@ export interface Subscription {
   ordering_enabled?: boolean;
   kitchen_enabled?: boolean;
   hr_enabled?: boolean;
+  online_enabled?: boolean;
   trial_ends_at: string;
   current_period_end: string | null;
   plan_code: string;
   /** Optional catalog package code (mirrors plan_code when set from Packages). */
   package_code?: string | null;
   notes?: string | null;
-  /** Non-owner staff seats included in the package */
+  /** Non-owner staff seats included in the package (1 per module + extras). */
   max_staff_seats?: number;
+  /** Extra seats purchased as a one-time add-on. */
+  extra_staff_seats?: number;
   /** Platform owner reminder to check on this café */
   follow_up_at?: string | null;
   follow_up_note?: string | null;
@@ -243,6 +249,8 @@ export function moduleFlag(
     case "hr":
       // Explicit false stays off; null/undefined defaults on (seats always needed).
       return sub.hr_enabled !== false;
+    case "online":
+      return Boolean(sub.online_enabled);
     default:
       return false;
   }
@@ -299,6 +307,7 @@ export const APP_MODULE_LABELS: Record<AppModule, string> = {
   inventory: "Inventory",
   finance: "Finance",
   hr: "HR / Staff",
+  online: "Website & public ordering",
 };
 
 export const SALE_ORDER_STATUS_LABELS: Record<SaleOrderStatus, string> = {

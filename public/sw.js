@@ -1,5 +1,5 @@
 /* Aramis Product service worker — cache shell for installable PWA */
-const CACHE = "aramis-shell-v4";
+const CACHE = "aramis-shell-v5";
 const PRECACHE = [
   "/icons/android-chrome-192x192.png",
   "/icons/android-chrome-512x512.png",
@@ -44,7 +44,13 @@ self.addEventListener("fetch", (event) => {
           return res;
         })
         .catch(() =>
-          caches.match(req).then((hit) => hit || caches.match("/app")),
+          caches.match(req).then((hit) => {
+            if (hit) return hit;
+            if (url.pathname.startsWith("/platform")) {
+              return caches.match("/platform");
+            }
+            return caches.match("/app");
+          }),
         ),
     );
     return;
@@ -69,4 +75,23 @@ self.addEventListener("fetch", (event) => {
       ),
     );
   }
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = event.notification.data?.url || "/platform";
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((list) => {
+        for (const client of list) {
+          if (client.url.includes("/platform") && "focus" in client) {
+            const tab = new URL(target, self.location.origin).searchParams.get("tab");
+            if (tab) client.postMessage({ type: "PLATFORM_NAV", tab });
+            return client.focus();
+          }
+        }
+        if (self.clients.openWindow) return self.clients.openWindow(target);
+      }),
+  );
 });

@@ -1,4 +1,5 @@
-import type { MemberRole, Membership, Subscription } from "@/lib/tenant";
+import type { AppModule, MemberRole, Membership, Subscription } from "@/lib/tenant";
+import { includedSeatsFromFlags, type ModuleToggleMap } from "@/lib/pricing";
 
 /** Feature keys the owner can grant to staff. */
 export type StaffFeature =
@@ -33,27 +34,42 @@ export const STAFF_FEATURE_LABELS: Record<StaffFeature, string> = {
   staff: "Manage staff (HR)",
 };
 
-/** Seat caps used for marketing packages. */
+/** Seat caps used for marketing packages (fallback only). */
 export const PLAN_STAFF_SEATS: Record<string, number> = {
-  aramis_starter: 2,
-  starter: 2,
-  basic: 2,
-  aramis_growth: 10,
-  growth: 10,
-  aramis_medium: 10,
-  medium: 10,
-  full: 25,
-  aramis_enterprise: 50,
-  enterprise: 50,
+  starter: 3,
+  intermediate: 5,
+  full: 7,
+  website: 4,
+  aramis_starter: 3,
+  growth: 5,
+  aramis_growth: 5,
 };
+
+export function flagsFromSubscription(sub: Subscription): ModuleToggleMap {
+  const inv = sub.inventory_enabled;
+  const ordering = sub.ordering_enabled ?? inv;
+  return {
+    menu: sub.menu_enabled ?? inv,
+    ordering,
+    kitchen: sub.kitchen_enabled ?? ordering,
+    inventory: inv,
+    finance: sub.finance_enabled,
+    hr: sub.hr_enabled ?? true,
+    online: Boolean(sub.online_enabled),
+  };
+}
 
 export function seatsForPlan(planCode: string, override?: number | null): number {
   if (typeof override === "number" && override > 0) return override;
-  return PLAN_STAFF_SEATS[planCode] ?? PLAN_STAFF_SEATS.aramis_starter;
+  return PLAN_STAFF_SEATS[planCode] ?? 3;
 }
 
+/** Included seats (1 per module) plus any extra seats purchased one-time. */
 export function maxStaffSeats(sub: Subscription): number {
-  return seatsForPlan(sub.plan_code, sub.max_staff_seats);
+  const included = includedSeatsFromFlags(flagsFromSubscription(sub));
+  const extra = Math.max(0, Number(sub.extra_staff_seats ?? 0));
+  const stored = Number(sub.max_staff_seats ?? 0);
+  return Math.max(included + extra, stored, 1);
 }
 
 export function isOwner(membership: Membership): boolean {

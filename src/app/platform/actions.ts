@@ -3,11 +3,27 @@
 import {
   calculateAmount,
   packageDbFlags,
+  seatColumns,
   type AmountBreakdown,
+  type AddonRow,
   type ModulePriceRow,
   type PackageRow,
 } from "@/lib/pricing";
-import { createAdminClient, createClient } from "@/lib/supabase/server";
+import {
+  billingForTenant,
+  catalogMonthlyPrice,
+  effectiveStatus,
+  revenueByMonth,
+  scoreUsage,
+  USAGE_WINDOW_DAYS,
+  type ProofLike,
+  type RevenueMonth,
+  type TenantBilling,
+  type TenantUsage,
+} from "@/lib/platform-metrics";
+import { fetchAllRows, requirePlatformAdmin, type AdminClient } from "@/lib/platform-admin";
+import { ensureOrgPublicSlug } from "@/lib/org-slug";
+import { createClient } from "@/lib/supabase/server";
 import type { AppModule, SubStatus } from "@/lib/tenant";
 
 const TRIAL_DAYS = Number(process.env.NEXT_PUBLIC_TRIAL_DAYS || 14);
@@ -33,15 +49,14 @@ function resolveAccessEnd(input: {
     }
     return { end };
   }
-  let days = Math.max(0, Math.floor(input.addDays ?? 0));
-  if (input.addMonths && input.addMonths > 0) {
-    days += Math.floor(input.addMonths * 30);
-  }
-  if (days <= 0) {
+  const days = Math.max(0, Math.floor(input.addDays ?? 0));
+  const months = Math.max(0, Math.floor(input.addMonths ?? 0));
+  if (days <= 0 && months <= 0) {
     return { error: "Provide an end date, or add at least 1 day/month" };
   }
   const end = input.from ? new Date(input.from) : new Date();
-  end.setDate(end.getDate() + days);
+  if (months > 0) end.setMonth(end.getMonth() + months);
+  if (days > 0) end.setDate(end.getDate() + days);
   return { end };
 }
 
@@ -72,36 +87,6 @@ function followUpPatch(input: {
   return patch;
 }
 
-async function requirePlatformAdmin() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Not signed in" as const };
-
-  const admin = createAdminClient();
-  const adminEmail = (
-    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_EMAIL || "admin@aramis.product"
-  ).toLowerCase();
-  if (user.email?.toLowerCase() === adminEmail) {
-    await admin
-      .from("profiles")
-      .update({ is_platform_admin: true, email: user.email })
-      .eq("id", user.id);
-  }
-
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (!profile?.is_platform_admin) {
-    return { error: "Not a platform admin" as const };
-  }
-  return { user, admin, profile };
-}
-
 export type ApplicationRow = Record<string, unknown>;
 
 export type ModuleToggleInput = {
@@ -111,6 +96,8 @@ export type ModuleToggleInput = {
   inventoryEnabled?: boolean;
   financeEnabled?: boolean;
   hrEnabled?: boolean;
+  onlineEnabled?: boolean;
+  extraStaffSeats?: number;
 };
 
 export type PlatformTenantRow = {
@@ -123,7 +110,20 @@ export type PlatformTenantRow = {
     email: string | null;
   } | null;
   ownerAuthEmail: string | null;
+  ownerLastSignInAt: string | null;
+  billing: TenantBilling;
 };
+
+async function loadCatalog(admin: AdminClient) {
+  const [{ data: packages }, { data: modulePrices }] = await Promise.all([
+    admin.from("subscription_packages").select("*"),
+    admin.from("subscription_module_prices").select("*").eq("active", true),
+  ]);
+  return {
+    packages: (packages || []) as PackageRow[],
+    modulePrices: (modulePrices || []) as ModulePriceRow[],
+  };
+}
 
 function resolveModuleFlags(
   input: ModuleToggleInput,
@@ -142,7 +142,68 @@ function resolveModuleFlags(
     finance_enabled:
       input.financeEnabled ?? Boolean(fallback?.finance_enabled ?? true),
     hr_enabled: input.hrEnabled ?? Boolean(fallback?.hr_enabled ?? true),
+    online_enabled:
+      input.onlineEnabled ?? Boolean(fallback?.online_enabled ?? false),
   };
+}
+
+function toggleMapFromDb(flags: {
+  menu_enabled: boolean;
+  ordering_enabled: boolean;
+  kitchen_enabled: boolean;
+  inventory_enabled: boolean;
+  finance_enabled: boolean;
+  hr_enabled: boolean;
+  online_enabled?: boolean;
+}) {
+  return {
+    menu: flags.menu_enabled,
+    ordering: flags.ordering_enabled,
+    kitchen: flags.kitchen_enabled,
+    inventory: flags.inventory_enabled,
+    finance: flags.finance_enabled,
+    hr: flags.hr_enabled,
+    online: Boolean(flags.online_enabled),
+  };
+}
+
+function seatPatch(
+  flags: {
+    menu_enabled: boolean;
+    ordering_enabled: boolean;
+    kitchen_enabled: boolean;
+    inventory_enabled: boolean;
+    finance_enabled: boolean;
+    hr_enabled: boolean;
+    online_enabled?: boolean;
+  },
+  extraSeats = 0,
+) {
+  const seats = seatColumns(toggleMapFromDb(flags), extraSeats);
+  return {
+    extra_staff_seats: seats.extra_staff_seats,
+    max_staff_seats: seats.max_staff_seats,
+  };
+}
+
+async function ensureOnlineSlug(
+  admin: AdminClient,
+  orgId: string,
+  onlineEnabled: boolean,
+) {
+  if (!onlineEnabled) return;
+  const { data: org } = await admin
+    .from("organizations")
+    .select("name, public_slug")
+    .eq("id", orgId)
+    .maybeSingle();
+  if (!org) return;
+  await ensureOrgPublicSlug(
+    admin,
+    orgId,
+    String(org.name),
+    (org.public_slug as string | null) ?? null,
+  );
 }
 
 /** Apply proof module columns when any are non-null; otherwise leave sub flags alone. */
@@ -154,6 +215,7 @@ function modulePatchFromProof(proof: Record<string, unknown>) {
     "inventory_enabled",
     "finance_enabled",
     "hr_enabled",
+    "online_enabled",
   ] as const;
   const hasAny = keys.some((k) => proof[k] !== null && proof[k] !== undefined);
   if (!hasAny) return {};
@@ -193,14 +255,33 @@ export async function listPlatformTenantsAction(): Promise<
 
   const orgIds = orgs.map((o) => o.id as string);
 
-  const [{ data: subs }, { data: memberships }] = await Promise.all([
-    admin.from("subscriptions").select("*").in("organization_id", orgIds),
-    admin
-      .from("memberships")
-      .select("user_id, role, organization_id")
-      .in("organization_id", orgIds)
-      .eq("role", "owner"),
-  ]);
+  const [{ data: subs }, { data: memberships }, approved, catalog] =
+    await Promise.all([
+      admin.from("subscriptions").select("*").in("organization_id", orgIds),
+      admin
+        .from("memberships")
+        .select("user_id, role, organization_id")
+        .in("organization_id", orgIds)
+        .eq("role", "owner"),
+      fetchAllRows<ProofLike>((from, to) =>
+        admin
+          .from("payment_proofs")
+          .select(
+            "organization_id, amount, status, months_requested, reviewed_at, created_at",
+          )
+          .eq("status", "approved")
+          .range(from, to),
+      ),
+      loadCatalog(admin),
+    ]);
+
+  const approvedByOrg = new Map<string, ProofLike[]>();
+  for (const p of approved.rows) {
+    const id = String(p.organization_id);
+    const list = approvedByOrg.get(id);
+    if (list) list.push(p);
+    else approvedByOrg.set(id, [p]);
+  }
 
   const subByOrg = new Map(
     (subs || []).map((s) => [s.organization_id as string, s]),
@@ -232,26 +313,42 @@ export async function listPlatformTenantsAction(): Promise<
     }
   }
 
-  const authEmailById = new Map<string, string | null>();
+  const authById = new Map<
+    string,
+    { email: string | null; lastSignInAt: string | null }
+  >();
   await Promise.all(
     ownerIds.map(async (uid) => {
       try {
         const { data: authUser } = await admin.auth.admin.getUserById(uid);
-        authEmailById.set(uid, authUser.user?.email ?? null);
+        authById.set(uid, {
+          email: authUser.user?.email ?? null,
+          lastSignInAt: authUser.user?.last_sign_in_at ?? null,
+        });
       } catch {
-        authEmailById.set(uid, null);
+        authById.set(uid, { email: null, lastSignInAt: null });
       }
     }),
   );
 
   const tenants: PlatformTenantRow[] = orgs.map((org) => {
-    const ownerId = ownerIdByOrg.get(org.id as string);
+    const orgId = org.id as string;
+    const ownerId = ownerIdByOrg.get(orgId);
     const owner = ownerId ? profilesById.get(ownerId) ?? null : null;
+    const auth = ownerId ? authById.get(ownerId) : undefined;
+    const subscription = subByOrg.get(orgId) ?? null;
     return {
       organization: org,
-      subscription: subByOrg.get(org.id as string) ?? null,
+      subscription,
       owner,
-      ownerAuthEmail: ownerId ? (authEmailById.get(ownerId) ?? null) : null,
+      ownerAuthEmail: auth?.email ?? null,
+      ownerLastSignInAt: auth?.lastSignInAt ?? null,
+      billing: billingForTenant(
+        subscription,
+        approvedByOrg.get(orgId) || [],
+        catalog.packages,
+        catalog.modulePrices,
+      ),
     };
   });
 
@@ -271,6 +368,8 @@ export async function approveOrganizationAction(input: {
   inventoryEnabled?: boolean;
   financeEnabled?: boolean;
   hrEnabled?: boolean;
+  onlineEnabled?: boolean;
+  extraStaffSeats?: number;
   packageCode?: string | null;
   adminNotes?: string;
   followUpAt?: string | null;
@@ -327,8 +426,7 @@ export async function approveOrganizationAction(input: {
   if ("error" in fu) return { error: fu.error };
 
   let flags = resolveModuleFlags(input, sub);
-  let planCode = (sub?.plan_code as string) || "aramis_starter";
-  let maxSeats: number | undefined;
+  let planCode = (sub?.plan_code as string) || "starter";
   if (input.packageCode) {
     const { data: pkg } = await admin
       .from("subscription_packages")
@@ -338,9 +436,12 @@ export async function approveOrganizationAction(input: {
     if (pkg) {
       flags = packageDbFlags(pkg as PackageRow);
       planCode = pkg.code;
-      maxSeats = Number(pkg.max_staff_seats) || 2;
     }
   }
+  const seats = seatPatch(
+    flags,
+    input.extraStaffSeats ?? Number(sub?.extra_staff_seats ?? 0),
+  );
 
   const { error: updOrg } = await admin
     .from("organizations")
@@ -362,7 +463,7 @@ export async function approveOrganizationAction(input: {
       trial_ends_at: trialEnds.toISOString(),
       plan_code: planCode,
       package_code: input.packageCode || planCode,
-      ...(maxSeats !== undefined ? { max_staff_seats: maxSeats } : {}),
+      ...seats,
       ...fu,
       notes:
         input.adminNotes ||
@@ -371,6 +472,12 @@ export async function approveOrganizationAction(input: {
     })
     .eq("organization_id", input.organizationId);
   if (updSub) return { error: updSub.message };
+
+  await ensureOnlineSlug(
+    admin,
+    input.organizationId,
+    Boolean(flags.online_enabled),
+  );
 
   const email =
     authUser.user.email ||
@@ -521,30 +628,35 @@ export async function updateTenantSubscriptionAction(input: {
   inventoryEnabled: boolean;
   financeEnabled: boolean;
   hrEnabled: boolean;
+  onlineEnabled?: boolean;
   trialDays?: number;
   periodMonths?: number;
-  maxStaffSeats?: number;
+  extraStaffSeats?: number;
   notes?: string;
 }) {
   const gate = await requirePlatformAdmin();
   if ("error" in gate) return { error: gate.error ?? "Unauthorized" };
   const { admin, user } = gate;
 
+  const { data: sub } = await admin
+    .from("subscriptions")
+    .select("*")
+    .eq("organization_id", input.organizationId)
+    .maybeSingle();
+
+  const flags = resolveModuleFlags(input, sub);
+  const seats = seatPatch(
+    flags,
+    input.extraStaffSeats ?? Number(sub?.extra_staff_seats ?? 0),
+  );
+
   const patch: Record<string, unknown> = {
     status: input.status,
-    menu_enabled: input.menuEnabled,
-    ordering_enabled: input.orderingEnabled,
-    kitchen_enabled: input.kitchenEnabled,
-    inventory_enabled: input.inventoryEnabled,
-    finance_enabled: input.financeEnabled,
-    hr_enabled: input.hrEnabled,
+    ...flags,
+    ...seats,
     notes: input.notes?.trim() || null,
     updated_at: new Date().toISOString(),
   };
-
-  if (input.maxStaffSeats !== undefined) {
-    patch.max_staff_seats = Math.max(0, Math.floor(input.maxStaffSeats));
-  }
 
   if (input.status === "trialing" || input.status === "active") {
     await admin
@@ -590,6 +702,11 @@ export async function updateTenantSubscriptionAction(input: {
     .update(patch)
     .eq("organization_id", input.organizationId);
   if (error) return { error: error.message };
+  await ensureOnlineSlug(
+    admin,
+    input.organizationId,
+    Boolean(flags.online_enabled),
+  );
   return { ok: true as const };
 }
 
@@ -623,7 +740,7 @@ export async function resetSubscriberPasswordAction(organizationId: string) {
   );
   if (error) return { error: error.message };
 
-  await admin
+  const { error: storeErr } = await admin
     .from("organizations")
     .update({
       platform_login_password: password,
@@ -640,6 +757,8 @@ export async function resetSubscriberPasswordAction(organizationId: string) {
     ok: true as const,
     email: authUser.user.email,
     password,
+    /** False when the platform_login_password migration is not applied. */
+    stored: !storeErr,
   };
 }
 
@@ -659,6 +778,9 @@ export type PaymentProofRow = Record<string, unknown> & {
   inventory_enabled?: boolean | null;
   finance_enabled?: boolean | null;
   hr_enabled?: boolean | null;
+  online_enabled?: boolean | null;
+  extra_staff_seats?: number | null;
+  addon_codes?: string[] | null;
   package_code?: string | null;
   expected_amount_etb?: number | null;
   amount_breakdown?: AmountBreakdown | null;
@@ -677,10 +799,23 @@ export type PlatformOverviewStats = {
   expired: number;
   pastDue: number;
   canceled: number;
+  /** Status says trialing/active but the end date has passed. */
+  lapsed: number;
   revenueThisMonth: number;
+  revenueLastMonth: number;
   revenueAllTime: number;
+  /** Monthly recurring revenue from live paid subscriptions. */
+  mrr: number;
+  /** MRR if every live trial converts at its catalog price. */
+  trialPipelineMrr: number;
+  payingCount: number;
+  arpa: number;
+  /** Approved orgs that have paid at least once / all approved orgs. */
+  conversionRate: number;
+  expiring7d: number;
+  revenueByMonth: RevenueMonth[];
   needsAttention: Array<{
-    kind: "kyc" | "payment" | "expiring" | "followup";
+    kind: "kyc" | "payment" | "expiring" | "followup" | "lapsed";
     organizationId: string;
     name: string;
     detail: string;
@@ -713,6 +848,8 @@ export async function approvePaymentProofAction(input: {
   inventoryEnabled?: boolean;
   financeEnabled?: boolean;
   hrEnabled?: boolean;
+  onlineEnabled?: boolean;
+  extraStaffSeats?: number;
   packageCode?: string | null;
   followUpAt?: string | null;
   followUpNote?: string | null;
@@ -770,7 +907,6 @@ export async function approvePaymentProofAction(input: {
 
   let fromPackage: Record<string, unknown> = {};
   let planCode: string | undefined;
-  let maxSeats: number | undefined;
   if (packageCode) {
     const { data: pkg } = await admin
       .from("subscription_packages")
@@ -780,7 +916,6 @@ export async function approvePaymentProofAction(input: {
     if (pkg) {
       fromPackage = packageDbFlags(pkg as PackageRow);
       planCode = pkg.code;
-      maxSeats = Number(pkg.max_staff_seats) || undefined;
     }
   }
 
@@ -791,7 +926,8 @@ export async function approvePaymentProofAction(input: {
     input.kitchenEnabled !== undefined ||
     input.inventoryEnabled !== undefined ||
     input.financeEnabled !== undefined ||
-    input.hrEnabled !== undefined;
+    input.hrEnabled !== undefined ||
+    input.onlineEnabled !== undefined;
 
   const modulePatch = hasOverride
     ? resolveModuleFlags(input, { ...sub, ...fromPackage, ...fromProof })
@@ -799,36 +935,23 @@ export async function approvePaymentProofAction(input: {
       ? fromPackage
       : fromProof;
 
-  const { error: subErr } = await admin
-    .from("subscriptions")
-    .update({
-      status: "active",
-      current_period_end: base.toISOString(),
-      ...modulePatch,
-      ...(planCode
-        ? { plan_code: planCode, package_code: planCode }
-        : {}),
-      ...(maxSeats !== undefined ? { max_staff_seats: maxSeats } : {}),
-      ...fu,
-      notes:
-        input.notes?.trim() ||
-        `Extended from proof ${proof.id} · until ${base.toISOString().slice(0, 10)}`,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("organization_id", proof.organization_id);
-  if (subErr) return { error: subErr.message };
+  const extraSeats = Math.max(
+    0,
+    Number(
+      input.extraStaffSeats ??
+        proof.extra_staff_seats ??
+        sub.extra_staff_seats ??
+        0,
+    ),
+  );
+  const seats = Object.keys(modulePatch).length
+    ? seatPatch(
+        resolveModuleFlags(input, { ...sub, ...fromPackage, ...fromProof }),
+        extraSeats,
+      )
+    : {};
 
-  await admin
-    .from("organizations")
-    .update({
-      verification_status: "approved",
-      verified_at: new Date().toISOString(),
-      verified_by: user.id,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", proof.organization_id);
-
-  const { error: updErr } = await admin
+  const { data: claimed, error: claimErr } = await admin
     .from("payment_proofs")
     .update({
       status: "approved",
@@ -840,8 +963,64 @@ export async function approvePaymentProofAction(input: {
       months_requested: months,
       ...(packageCode ? { package_code: packageCode } : {}),
     })
-    .eq("id", proof.id);
-  if (updErr) return { error: updErr.message };
+    .eq("id", proof.id)
+    .eq("status", proof.status)
+    .select("id");
+  if (claimErr) return { error: claimErr.message };
+  if (!claimed?.length) {
+    return { error: "This proof was already handled — refresh the list" };
+  }
+
+  const { error: subErr } = await admin
+    .from("subscriptions")
+    .update({
+      status: "active",
+      current_period_end: base.toISOString(),
+      ...modulePatch,
+      ...(planCode
+        ? { plan_code: planCode, package_code: planCode }
+        : {}),
+      ...seats,
+      ...fu,
+      notes:
+        input.notes?.trim() ||
+        `Extended from proof ${proof.id} · until ${base.toISOString().slice(0, 10)}`,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("organization_id", proof.organization_id);
+  if (subErr) {
+    await admin
+      .from("payment_proofs")
+      .update({
+        status: proof.status,
+        reviewed_by: proof.reviewed_by ?? null,
+        reviewed_at: proof.reviewed_at ?? null,
+        notes: proof.notes ?? null,
+        months_requested: proof.months_requested,
+        package_code: proof.package_code ?? null,
+      })
+      .eq("id", proof.id);
+    return { error: subErr.message };
+  }
+
+  await admin
+    .from("organizations")
+    .update({
+      verification_status: "approved",
+      verified_at: new Date().toISOString(),
+      verified_by: user.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", proof.organization_id);
+
+  await ensureOnlineSlug(
+    admin,
+    String(proof.organization_id),
+    Boolean(
+      resolveModuleFlags(input, { ...sub, ...fromPackage, ...fromProof })
+        .online_enabled,
+    ),
+  );
 
   return {
     ok: true as const,
@@ -887,13 +1066,21 @@ export async function getPricingCatalogAction(opts?: { includeInactive?: boolean
     .select("*")
     .order("sort_order", { ascending: true });
 
+  let addonQ = supabase
+    .from("subscription_addons")
+    .select("*")
+    .order("sort_order", { ascending: true });
   if (!includeInactive) {
     pkgQ = pkgQ.eq("active", true);
     modQ = modQ.eq("active", true);
+    addonQ = addonQ.eq("active", true);
   }
 
-  const [{ data: packages, error: pkgErr }, { data: modules, error: modErr }] =
-    await Promise.all([pkgQ, modQ]);
+  const [
+    { data: packages, error: pkgErr },
+    { data: modules, error: modErr },
+    { data: addons },
+  ] = await Promise.all([pkgQ, modQ, addonQ]);
 
   if (pkgErr) return { error: pkgErr.message };
   if (modErr) return { error: modErr.message };
@@ -901,6 +1088,7 @@ export async function getPricingCatalogAction(opts?: { includeInactive?: boolean
   return {
     packages: (packages || []) as PackageRow[],
     modulePrices: (modules || []) as ModulePriceRow[],
+    addons: (addons || []) as AddonRow[],
   };
 }
 
@@ -909,17 +1097,24 @@ export async function listPricingCatalogAction() {
   const gate = await requirePlatformAdmin();
   if ("error" in gate) return { error: gate.error ?? "Unauthorized" };
 
-  const [{ data: packages, error: pkgErr }, { data: modules, error: modErr }] =
-    await Promise.all([
-      gate.admin
-        .from("subscription_packages")
-        .select("*")
-        .order("sort_order", { ascending: true }),
-      gate.admin
-        .from("subscription_module_prices")
-        .select("*")
-        .order("sort_order", { ascending: true }),
-    ]);
+  const [
+    { data: packages, error: pkgErr },
+    { data: modules, error: modErr },
+    { data: addons },
+  ] = await Promise.all([
+    gate.admin
+      .from("subscription_packages")
+      .select("*")
+      .order("sort_order", { ascending: true }),
+    gate.admin
+      .from("subscription_module_prices")
+      .select("*")
+      .order("sort_order", { ascending: true }),
+    gate.admin
+      .from("subscription_addons")
+      .select("*")
+      .order("sort_order", { ascending: true }),
+  ]);
 
   if (pkgErr) return { error: pkgErr.message };
   if (modErr) return { error: modErr.message };
@@ -927,6 +1122,7 @@ export async function listPricingCatalogAction() {
   return {
     packages: (packages || []) as PackageRow[],
     modulePrices: (modules || []) as ModulePriceRow[],
+    addons: (addons || []) as AddonRow[],
   };
 }
 
@@ -942,7 +1138,9 @@ export async function upsertPackageAction(input: {
   inventoryEnabled: boolean;
   financeEnabled: boolean;
   hrEnabled: boolean;
+  onlineEnabled?: boolean;
   maxStaffSeats: number;
+  extraStaffSeats?: number;
   active: boolean;
   sortOrder?: number;
 }) {
@@ -952,18 +1150,25 @@ export async function upsertPackageAction(input: {
   const code = input.code.trim().toLowerCase().replace(/\s+/g, "_");
   if (!code) return { error: "Package code required" };
 
-  const row = {
-    code,
-    name: input.name.trim(),
-    description: input.description?.trim() || null,
-    monthly_price_etb: Math.max(0, Number(input.monthlyPriceEtb) || 0),
+  const flags = {
     menu_enabled: input.menuEnabled,
     ordering_enabled: input.orderingEnabled,
     kitchen_enabled: input.kitchenEnabled,
     inventory_enabled: input.inventoryEnabled,
     finance_enabled: input.financeEnabled,
     hr_enabled: input.hrEnabled,
-    max_staff_seats: Math.max(0, Math.floor(input.maxStaffSeats)),
+    online_enabled: Boolean(input.onlineEnabled),
+  };
+  const extra = Math.max(0, Math.floor(input.extraStaffSeats || 0));
+  const seats = seatPatch(flags, extra);
+
+  const row = {
+    code,
+    name: input.name.trim(),
+    description: input.description?.trim() || null,
+    monthly_price_etb: Math.max(0, Number(input.monthlyPriceEtb) || 0),
+    ...flags,
+    max_staff_seats: seats.max_staff_seats,
     active: input.active,
     sort_order: input.sortOrder ?? 0,
     updated_at: new Date().toISOString(),
@@ -1008,6 +1213,32 @@ export async function updateModulePriceAction(input: {
   return { ok: true as const };
 }
 
+export async function updateAddonAction(input: {
+  code: string;
+  name?: string;
+  description?: string;
+  priceEtb: number;
+  active: boolean;
+}) {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { error: gate.error ?? "Unauthorized" };
+
+  const { error } = await gate.admin
+    .from("subscription_addons")
+    .update({
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description.trim() || null }
+        : {}),
+      price_etb: Math.max(0, Number(input.priceEtb) || 0),
+      active: input.active,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("code", input.code);
+  if (error) return { error: error.message };
+  return { ok: true as const };
+}
+
 export async function setPackageActiveAction(input: {
   packageId: string;
   active: boolean;
@@ -1038,6 +1269,8 @@ export async function startTrialAction(input: {
   inventoryEnabled?: boolean;
   financeEnabled?: boolean;
   hrEnabled?: boolean;
+  onlineEnabled?: boolean;
+  extraStaffSeats?: number;
   packageCode?: string | null;
   notes?: string;
   issuePassword?: boolean;
@@ -1081,8 +1314,7 @@ export async function startTrialAction(input: {
   if ("error" in fu) return { error: fu.error };
 
   let flags = resolveModuleFlags(input, sub);
-  let planCode = (sub.plan_code as string) || "aramis_starter";
-  let maxSeats: number | undefined;
+  let planCode = (sub.plan_code as string) || "starter";
   if (input.packageCode) {
     const { data: pkg } = await admin
       .from("subscription_packages")
@@ -1092,9 +1324,12 @@ export async function startTrialAction(input: {
     if (pkg) {
       flags = packageDbFlags(pkg as PackageRow);
       planCode = pkg.code;
-      maxSeats = Number(pkg.max_staff_seats) || 2;
     }
   }
+  const seats = seatPatch(
+    flags,
+    input.extraStaffSeats ?? Number(sub?.extra_staff_seats ?? 0),
+  );
 
   if (org.verification_status !== "approved") {
     await admin
@@ -1125,7 +1360,7 @@ export async function startTrialAction(input: {
       trial_ends_at: trialEnds.toISOString(),
       plan_code: planCode,
       package_code: input.packageCode || planCode,
-      ...(maxSeats !== undefined ? { max_staff_seats: maxSeats } : {}),
+      ...seats,
       ...fu,
       notes:
         input.notes ||
@@ -1134,6 +1369,12 @@ export async function startTrialAction(input: {
     })
     .eq("organization_id", input.organizationId);
   if (subErr) return { error: subErr.message };
+
+  await ensureOnlineSlug(
+    admin,
+    input.organizationId,
+    Boolean(flags.online_enabled),
+  );
 
   let email: string | null = (org.email as string) || null;
   let password: string | undefined;
@@ -1251,6 +1492,8 @@ export async function grantPaidMonthsAction(input: {
   inventoryEnabled?: boolean;
   financeEnabled?: boolean;
   hrEnabled?: boolean;
+  onlineEnabled?: boolean;
+  extraStaffSeats?: number;
   packageCode?: string | null;
   notes?: string;
   followUpAt?: string | null;
@@ -1300,7 +1543,6 @@ export async function grantPaidMonthsAction(input: {
 
   let flags = resolveModuleFlags(input, sub);
   let planCode = (sub.plan_code as string) || undefined;
-  let maxSeats: number | undefined;
   if (input.packageCode) {
     const { data: pkg } = await admin
       .from("subscription_packages")
@@ -1310,9 +1552,12 @@ export async function grantPaidMonthsAction(input: {
     if (pkg) {
       flags = packageDbFlags(pkg as PackageRow);
       planCode = pkg.code;
-      maxSeats = Number(pkg.max_staff_seats) || 2;
     }
   }
+  const seats = seatPatch(
+    flags,
+    input.extraStaffSeats ?? Number(sub?.extra_staff_seats ?? 0),
+  );
 
   const { error } = await admin
     .from("subscriptions")
@@ -1323,7 +1568,7 @@ export async function grantPaidMonthsAction(input: {
       ...(planCode
         ? { plan_code: planCode, package_code: planCode }
         : {}),
-      ...(maxSeats !== undefined ? { max_staff_seats: maxSeats } : {}),
+      ...seats,
       ...fu,
       notes:
         input.notes?.trim() ||
@@ -1342,6 +1587,12 @@ export async function grantPaidMonthsAction(input: {
       updated_at: new Date().toISOString(),
     })
     .eq("id", input.organizationId);
+
+  await ensureOnlineSlug(
+    admin,
+    input.organizationId,
+    Boolean(flags.online_enabled),
+  );
 
   return {
     ok: true as const,
@@ -1430,25 +1681,36 @@ export async function getPlatformOverviewAction(): Promise<
   if ("error" in gate) return { error: gate.error ?? "Unauthorized" };
   const { admin } = gate;
 
-  const [
-    { data: orgs },
-    { data: subs },
-    { data: proofs },
-  ] = await Promise.all([
-    admin.from("organizations").select("id, name, verification_status, created_at"),
-    admin
-      .from("subscriptions")
-      .select(
-        "organization_id, status, trial_ends_at, current_period_end, plan_code, follow_up_at, follow_up_note",
+  const [{ data: orgs }, { data: subs }, proofsRes, catalog] =
+    await Promise.all([
+      admin
+        .from("organizations")
+        .select("id, name, verification_status, created_at"),
+      admin.from("subscriptions").select("*"),
+      fetchAllRows<Record<string, unknown>>((from, to) =>
+        admin
+          .from("payment_proofs")
+          .select(
+            "id, organization_id, amount, status, months_requested, reviewed_at, created_at, organizations(name)",
+          )
+          .range(from, to),
       ),
-    admin
-      .from("payment_proofs")
-      .select("id, organization_id, amount, status, created_at, organizations(name)"),
-  ]);
+      loadCatalog(admin),
+    ]);
 
   const orgList = orgs || [];
-  const subList = subs || [];
-  const proofList = proofs || [];
+  const subList = (subs || []) as Record<string, unknown>[];
+  const proofList = proofsRes.rows;
+  const approvedProofs = proofList.filter(
+    (p) => p.status === "approved",
+  ) as unknown as ProofLike[];
+  const approvedByOrg = new Map<string, ProofLike[]>();
+  for (const p of approvedProofs) {
+    const id = String(p.organization_id);
+    const list = approvedByOrg.get(id);
+    if (list) list.push(p);
+    else approvedByOrg.set(id, [p]);
+  }
   const orgName = new Map(
     orgList.map((o) => [o.id as string, String(o.name || "—")]),
   );
@@ -1463,8 +1725,14 @@ export async function getPlatformOverviewAction(): Promise<
   let expired = 0;
   let pastDue = 0;
   let canceled = 0;
+  let lapsed = 0;
   let followUpsDue = 0;
+  let mrr = 0;
+  let trialPipelineMrr = 0;
+  let payingCount = 0;
+  let expiring7d = 0;
   const now = Date.now();
+  const sevenDays = 7 * 24 * 60 * 60 * 1000;
   const tenDays = 10 * 24 * 60 * 60 * 1000;
   /** Surface follow-ups that are due or within the next 48h */
   const followSoon = 2 * 24 * 60 * 60 * 1000;
@@ -1498,24 +1766,55 @@ export async function getPlatformOverviewAction(): Promise<
 
   for (const s of subList) {
     const st = String(s.status);
-    if (st === "trialing") trialing += 1;
-    else if (st === "active") active += 1;
-    else if (st === "expired") expired += 1;
-    else if (st === "past_due") pastDue += 1;
-    else if (st === "canceled") canceled += 1;
+    const orgId = s.organization_id as string;
+    const eff = effectiveStatus(s, now);
+    if (eff === "trialing") {
+      trialing += 1;
+      trialPipelineMrr += catalogMonthlyPrice(
+        s,
+        catalog.packages,
+        catalog.modulePrices,
+      );
+    } else if (eff === "active") {
+      active += 1;
+      payingCount += 1;
+      mrr += billingForTenant(
+        s,
+        approvedByOrg.get(orgId) || [],
+        catalog.packages,
+        catalog.modulePrices,
+      ).monthlyEtb;
+    } else if (eff === "lapsed_trial" || eff === "lapsed_paid") {
+      lapsed += 1;
+      needsAttention.push({
+        kind: "lapsed",
+        organizationId: orgId,
+        name: orgName.get(orgId) || "—",
+        detail:
+          eff === "lapsed_trial"
+            ? "Trial ended — no payment yet"
+            : "Paid period ended — renewal needed",
+        at: (st === "trialing" ? s.trial_ends_at : s.current_period_end) as
+          | string
+          | null,
+      });
+    } else if (eff === "expired") expired += 1;
+    else if (eff === "past_due") pastDue += 1;
+    else if (eff === "canceled") canceled += 1;
 
-    if (st === "trialing" || st === "active") {
+    if (eff === "trialing" || eff === "active") {
       const endRaw =
         st === "trialing" ? s.trial_ends_at : s.current_period_end;
       if (endRaw) {
         const endMs = new Date(endRaw as string).getTime();
+        if (endMs > now && endMs - now <= sevenDays) expiring7d += 1;
         if (endMs > now && endMs - now <= tenDays) {
           const days = Math.ceil((endMs - now) / (1000 * 60 * 60 * 24));
           needsAttention.push({
             kind: "expiring",
-            organizationId: s.organization_id as string,
-            name: orgName.get(s.organization_id as string) || "—",
-            detail: `${st} ends in ${days}d`,
+            organizationId: orgId,
+            name: orgName.get(orgId) || "—",
+            detail: `${eff === "trialing" ? "Trial" : "Paid period"} ends in ${days}d`,
             at: endRaw as string,
           });
         }
@@ -1540,19 +1839,26 @@ export async function getPlatformOverviewAction(): Promise<
     }
   }
 
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
-  let revenueThisMonth = 0;
-  let revenueAllTime = 0;
-  for (const p of proofList) {
-    if (p.status !== "approved") continue;
-    const amt = Number(p.amount) || 0;
-    revenueAllTime += amt;
-    if (p.created_at && new Date(p.created_at as string) >= monthStart) {
-      revenueThisMonth += amt;
-    }
-  }
+  const months = revenueByMonth(approvedProofs, 6);
+  const revenueThisMonth = months[months.length - 1]?.amount ?? 0;
+  const revenueLastMonth = months[months.length - 2]?.amount ?? 0;
+  const revenueAllTime = approvedProofs.reduce(
+    (sum, p) => sum + (Number(p.amount) || 0),
+    0,
+  );
+
+  const approvedOrgs = orgList.filter(
+    (o) => o.verification_status === "approved",
+  );
+  const subByOrg = new Map(subList.map((s) => [String(s.organization_id), s]));
+  const everPaid = approvedOrgs.filter(
+    (o) =>
+      approvedByOrg.has(String(o.id)) ||
+      subByOrg.get(String(o.id))?.current_period_end,
+  ).length;
+  const conversionRate = approvedOrgs.length
+    ? everPaid / approvedOrgs.length
+    : 0;
 
   needsAttention.sort((a, b) => {
     const ta = a.at ? new Date(a.at).getTime() : 0;
@@ -1571,9 +1877,18 @@ export async function getPlatformOverviewAction(): Promise<
       expired,
       pastDue,
       canceled,
+      lapsed,
       revenueThisMonth,
+      revenueLastMonth,
       revenueAllTime,
-      needsAttention: needsAttention.slice(0, 25),
+      mrr: Math.round(mrr),
+      trialPipelineMrr: Math.round(trialPipelineMrr),
+      payingCount,
+      arpa: payingCount ? Math.round(mrr / payingCount) : 0,
+      conversionRate,
+      expiring7d,
+      revenueByMonth: months,
+      needsAttention: needsAttention.slice(0, 40),
     },
   };
 }
@@ -1594,4 +1909,221 @@ export async function previewBillingAmountAction(input: {
     modules: input.modules as Partial<Record<AppModule, boolean>>,
   });
   return { breakdown };
+}
+
+// ═══════════════════════════════════════
+// Subscriber usage (engagement)
+// ═══════════════════════════════════════
+
+const USAGE_TZ = "Africa/Addis_Ababa";
+
+function dayKeyInTz(d: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: USAGE_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+export async function getTenantUsageAction(): Promise<
+  | { usage: Record<string, TenantUsage>; dayKeys: string[]; generatedAt: string }
+  | { error: string }
+> {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { error: gate.error ?? "Unauthorized" };
+  const { admin } = gate;
+
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+  const windowStart = new Date(now - USAGE_WINDOW_DAYS * DAY).toISOString();
+  const prevStart = new Date(now - USAGE_WINDOW_DAYS * 2 * DAY).toISOString();
+  const weekStartMs = now - 7 * DAY;
+
+  const dayKeys: string[] = [];
+  for (let i = USAGE_WINDOW_DAYS - 1; i >= 0; i--) {
+    dayKeys.push(dayKeyInTz(new Date(now - i * DAY)));
+  }
+  const dayIndex = new Map(dayKeys.map((k, i) => [k, i]));
+
+  type OrderRow = {
+    organization_id: string;
+    total: number | string | null;
+    status: string | null;
+    payment_status: string | null;
+    created_at: string;
+    day_key: string | null;
+    source?: string | null;
+  };
+  type OrgRef = { organization_id: string };
+
+  const [orders, members, menu, inventory, moves, closes, xReports, subs] =
+    await Promise.all([
+      fetchAllRows<OrderRow>((from, to) =>
+        admin
+          .from("sale_orders")
+          .select(
+            "organization_id, total, status, payment_status, created_at, day_key, source",
+          )
+          .gte("created_at", prevStart)
+          .range(from, to),
+        200_000,
+      ),
+      fetchAllRows<OrgRef & { role: string; active: boolean | null }>(
+        (from, to) =>
+          admin
+            .from("memberships")
+            .select("organization_id, role, active")
+            .range(from, to),
+      ),
+      fetchAllRows<OrgRef>((from, to) =>
+        admin.from("menu_items").select("organization_id").range(from, to),
+      ),
+      fetchAllRows<OrgRef>((from, to) =>
+        admin.from("inventory_items").select("organization_id").range(from, to),
+      ),
+      fetchAllRows<OrgRef>((from, to) =>
+        admin
+          .from("inventory_movements")
+          .select("organization_id")
+          .gte("created_at", windowStart)
+          .range(from, to),
+      ),
+      fetchAllRows<OrgRef>((from, to) =>
+        admin
+          .from("day_closes")
+          .select("organization_id")
+          .gte("closed_at", windowStart)
+          .range(from, to),
+      ),
+      fetchAllRows<OrgRef>((from, to) =>
+        admin
+          .from("x_reports")
+          .select("organization_id")
+          .gte("counted_at", windowStart)
+          .range(from, to),
+      ),
+      admin.from("subscriptions").select("*"),
+    ]);
+
+  if (orders.error) return { error: orders.error };
+
+  const usage: Record<string, TenantUsage> = {};
+  const activeDays = new Map<string, Set<string>>();
+  const get = (orgId: string): TenantUsage => {
+    let u = usage[orgId];
+    if (!u) {
+      u = {
+        organizationId: orgId,
+        orders7d: 0,
+        orders30d: 0,
+        ordersPrev30d: 0,
+        sales30d: 0,
+        lastOrderAt: null,
+        activeDays30d: 0,
+        dailyOrders: dayKeys.map(() => 0),
+        dailySales: dayKeys.map(() => 0),
+        staffActive: 0,
+        menuItems: 0,
+        inventoryItems: 0,
+        inventoryMoves30d: 0,
+        dayCloses30d: 0,
+        modulesUsed: [],
+        score: 0,
+        segment: "not_started",
+      };
+      usage[orgId] = u;
+    }
+    return u;
+  };
+
+  const windowStartMs = new Date(windowStart).getTime();
+  const onlineOrgs = new Set<string>();
+  for (const o of orders.rows) {
+    if (o.status === "canceled") continue;
+    const u = get(o.organization_id);
+    const at = new Date(o.created_at).getTime();
+    if (!u.lastOrderAt || at > new Date(u.lastOrderAt).getTime()) {
+      u.lastOrderAt = o.created_at;
+    }
+    if (at < windowStartMs) {
+      u.ordersPrev30d += 1;
+      continue;
+    }
+    u.orders30d += 1;
+    if (o.source === "online") onlineOrgs.add(o.organization_id);
+    if (at >= weekStartMs) u.orders7d += 1;
+    const key = o.day_key || dayKeyInTz(new Date(o.created_at));
+    const i = dayIndex.get(key);
+    const paid = o.payment_status !== "unpaid";
+    const total = Number(o.total) || 0;
+    if (paid) u.sales30d += total;
+    if (i !== undefined) {
+      u.dailyOrders[i] += 1;
+      if (paid) u.dailySales[i] += total;
+    }
+    let days = activeDays.get(o.organization_id);
+    if (!days) {
+      days = new Set();
+      activeDays.set(o.organization_id, days);
+    }
+    days.add(key);
+  }
+  for (const [orgId, days] of activeDays) get(orgId).activeDays30d = days.size;
+
+  for (const m of members.rows) {
+    if (m.role !== "owner" && m.active !== false) get(m.organization_id).staffActive += 1;
+  }
+  for (const r of menu.rows) get(r.organization_id).menuItems += 1;
+  for (const r of inventory.rows) get(r.organization_id).inventoryItems += 1;
+  for (const r of moves.rows) get(r.organization_id).inventoryMoves30d += 1;
+  for (const r of closes.rows) get(r.organization_id).dayCloses30d += 1;
+  const xByOrg = new Map<string, number>();
+  for (const r of xReports.rows) {
+    xByOrg.set(r.organization_id, (xByOrg.get(r.organization_id) || 0) + 1);
+  }
+
+  const subByOrg = new Map(
+    ((subs.data || []) as Record<string, unknown>[]).map((s) => [
+      String(s.organization_id),
+      s,
+    ]),
+  );
+
+  for (const sub of subByOrg.values()) get(String(sub.organization_id));
+
+  for (const u of Object.values(usage)) {
+    const sub = subByOrg.get(u.organizationId);
+    const signals: Partial<Record<AppModule, boolean>> = {
+      menu: u.menuItems > 0,
+      ordering: u.orders30d > 0,
+      kitchen: u.orders30d > 0,
+      inventory: u.inventoryMoves30d > 0,
+      finance: u.dayCloses30d + (xByOrg.get(u.organizationId) || 0) > 0,
+      hr: u.staffActive > 0,
+      online: onlineOrgs.has(u.organizationId),
+    };
+    const tracked = Object.keys(signals) as AppModule[];
+    const enabled = tracked.filter((m) => {
+      if (m === "online") return Boolean(sub?.online_enabled);
+      const v = sub?.[`${m}_enabled`];
+      return v === undefined || v === null ? true : Boolean(v);
+    });
+    u.modulesUsed = enabled.filter((m) => signals[m]);
+    const { score, segment } = scoreUsage({
+      activeDays30d: u.activeDays30d,
+      lastOrderAt: u.lastOrderAt,
+      orders30d: u.orders30d,
+      ordersPrev30d: u.ordersPrev30d,
+      modulesUsed: u.modulesUsed.length,
+      modulesEnabled: enabled.length,
+      menuItems: u.menuItems,
+      now,
+    });
+    u.score = score;
+    u.segment = segment;
+    u.sales30d = Math.round(u.sales30d * 100) / 100;
+  }
+
+  return { usage, dayKeys, generatedAt: new Date(now).toISOString() };
 }

@@ -6,6 +6,12 @@ import {
 } from "@/lib/tenant";
 import { cn } from "@/lib/utils";
 import type { PaymentProofRow } from "@/app/platform/actions";
+import {
+  EFFECTIVE_STATUS_LABELS,
+  USAGE_SEGMENT_LABELS,
+  type EffectiveStatus,
+  type UsageSegment,
+} from "@/lib/platform-metrics";
 
 export const MODULES: AppModule[] = [
   "menu",
@@ -14,6 +20,7 @@ export const MODULES: AppModule[] = [
   "inventory",
   "finance",
   "hr",
+  "online",
 ];
 
 export type ModuleState = Record<AppModule, boolean>;
@@ -50,6 +57,7 @@ export function flagsFromSub(
       sub?.hr_enabled === undefined || sub?.hr_enabled === null
         ? true
         : Boolean(sub.hr_enabled),
+    online: Boolean(sub?.online_enabled),
   };
 }
 
@@ -66,6 +74,7 @@ export function flagsFromProof(proof: PaymentProofRow): ModuleState {
       inventory: true,
       finance: true,
       hr: true,
+      online: false,
     };
   }
   return {
@@ -78,6 +87,9 @@ export function flagsFromProof(proof: PaymentProofRow): ModuleState {
     inventory: Boolean(proof.inventory_enabled),
     finance: Boolean(proof.finance_enabled),
     hr: Boolean(proof.hr_enabled),
+    online: Boolean(
+      (proof as { online_enabled?: boolean | null }).online_enabled,
+    ),
   };
 }
 
@@ -177,14 +189,121 @@ export function StatusPill({
   );
 }
 
+const SEGMENT_TONE: Record<UsageSegment, "teal" | "gold" | "coral" | "ink"> = {
+  healthy: "teal",
+  at_risk: "gold",
+  dormant: "coral",
+  not_started: "ink",
+};
+
+export function SegmentPill({ segment }: { segment: UsageSegment }) {
+  return (
+    <StatusPill
+      status={USAGE_SEGMENT_LABELS[segment]}
+      tone={SEGMENT_TONE[segment]}
+    />
+  );
+}
+
+const EFFECTIVE_TONE: Record<EffectiveStatus, "teal" | "gold" | "coral" | "ink"> = {
+  trialing: "teal",
+  active: "teal",
+  lapsed_trial: "coral",
+  lapsed_paid: "coral",
+  past_due: "gold",
+  expired: "coral",
+  canceled: "ink",
+  none: "ink",
+};
+
+export function EffectiveStatusPill({ status }: { status: EffectiveStatus }) {
+  return (
+    <StatusPill
+      status={EFFECTIVE_STATUS_LABELS[status]}
+      tone={EFFECTIVE_TONE[status]}
+    />
+  );
+}
+
+export function ScoreBar({ score }: { score: number }) {
+  const tone =
+    score >= 65 ? "bg-teal" : score >= 45 ? "bg-gold" : "bg-coral";
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-ink/8">
+        <div
+          className={cn("h-full rounded-full", tone)}
+          style={{ width: `${Math.max(3, Math.min(100, score))}%` }}
+        />
+      </div>
+      <span className="text-xs font-semibold tabular-nums text-ink/70">
+        {score}
+      </span>
+    </div>
+  );
+}
+
+/** Compact bar strip for daily counts (oldest → newest). */
+export function MiniBars({
+  values,
+  className,
+}: {
+  values: number[];
+  className?: string;
+}) {
+  const max = Math.max(1, ...values);
+  return (
+    <div
+      className={cn("flex h-6 items-end gap-px", className)}
+      aria-hidden
+    >
+      {values.map((v, i) => (
+        <span
+          key={i}
+          className={cn(
+            "w-1 rounded-sm",
+            v > 0 ? "bg-teal/70" : "bg-ink/8",
+          )}
+          style={{ height: `${v > 0 ? Math.max(15, (v / max) * 100) : 12}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+export function trendPercent(current: number, previous: number): number | null {
+  if (previous <= 0) return current > 0 ? null : 0;
+  return Math.round(((current - previous) / previous) * 100);
+}
+
+export function TrendBadge({
+  current,
+  previous,
+}: {
+  current: number;
+  previous: number;
+}) {
+  const pct = trendPercent(current, previous);
+  if (pct === null) {
+    return <span className="text-[10px] font-semibold text-teal">new</span>;
+  }
+  return (
+    <span
+      className={cn(
+        "text-[10px] font-semibold tabular-nums",
+        pct > 0 ? "text-teal" : pct < 0 ? "text-coral" : "text-ink/45",
+      )}
+    >
+      {pct > 0 ? "▲" : pct < 0 ? "▼" : "•"} {Math.abs(pct)}%
+    </span>
+  );
+}
+
 export function SkeletonCards({ count = 3 }: { count?: number }) {
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-3" aria-busy aria-label="Loading">
       {Array.from({ length: count }).map((_, i) => (
-        <div
-          key={i}
-          className="h-28 animate-pulse rounded-3xl border border-ink/5 bg-white/70"
-        />
+        <div key={i} className="shimmer h-28 rounded-3xl" />
       ))}
     </div>
   );

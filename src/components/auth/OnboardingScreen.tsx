@@ -25,9 +25,11 @@ export function OnboardingScreen() {
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState(true);
   const [ordering, setOrdering] = useState(true);
+  const [kitchen, setKitchen] = useState(true);
   const [inventory, setInventory] = useState(true);
   const [finance, setFinance] = useState(true);
   const [hr, setHr] = useState(true);
+  const [online, setOnline] = useState(false);
 
   useEffect(() => {
     if (!ready || !sessionResolved) return;
@@ -81,7 +83,9 @@ export function OnboardingScreen() {
       financeEnabled: finance,
       menuEnabled: menu,
       orderingEnabled: ordering,
+      kitchenEnabled: kitchen,
       hrEnabled: hr,
+      onlineEnabled: online,
       licenseFile: (fd.get("license") as File) || null,
       idFile: (fd.get("idDoc") as File) || null,
     });
@@ -227,9 +231,17 @@ export function OnboardingScreen() {
               [
                 ["menu", menu, setMenu, "Menu", "Item catalog & recipes"],
                 ["ordering", ordering, setOrdering, "Ordering", "Cashier POS"],
+                ["kitchen", kitchen, setKitchen, "Kitchen", "Kitchen display"],
                 ["inventory", inventory, setInventory, "Inventory", "Stock & costs"],
                 ["finance", finance, setFinance, "Finance", "Reports & day close"],
                 ["hr", hr, setHr, "HR / Staff", "Team seats & permissions"],
+                [
+                  "online",
+                  online,
+                  setOnline,
+                  "Website & public ordering",
+                  "Guest menu page with name and phone",
+                ],
               ] as const
             ).map(([key, checked, set, label, blurb]) => (
               <label

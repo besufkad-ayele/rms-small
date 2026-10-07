@@ -11,9 +11,11 @@ import { formatDateTime } from "@/lib/utils";
 const MODULES: AppModule[] = [
   "menu",
   "ordering",
+  "kitchen",
   "inventory",
   "finance",
   "hr",
+  "online",
 ];
 
 export default function PendingPage() {

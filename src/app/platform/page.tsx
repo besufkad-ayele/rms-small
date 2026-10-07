@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { PlatformDashboard } from "@/components/platform/PlatformDashboard";
+import { PlatformPageShimmer } from "@/components/ui/Shimmer";
 
 export default function PlatformPage() {
   const { ready, sessionResolved, user, isPlatformAdmin, logout } = useAuth();
@@ -17,11 +18,7 @@ export default function PlatformPage() {
   }, [ready, sessionResolved, user, router]);
 
   if (!ready || !sessionResolved || !user) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-stone">
-        <p className="text-sm text-ink/60">Loading platform…</p>
-      </div>
-    );
+    return <PlatformPageShimmer />;
   }
 
   if (!isPlatformAdmin) {

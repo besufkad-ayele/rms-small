@@ -111,6 +111,10 @@ export interface CloudSaleOrder {
   cancel_requested?: boolean;
   cancel_requested_by?: string | null;
   cancel_requested_at?: string | null;
+  source?: "pos" | "online" | string | null;
+  guest_name?: string | null;
+  guest_phone?: string | null;
+  guest_note?: string | null;
   created_at: string;
   lines?: CloudSaleLine[];
   sale_order_lines?: CloudSaleLine[];

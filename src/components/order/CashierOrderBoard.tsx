@@ -542,8 +542,14 @@ function OrderDetailPanel({
           <p className="mt-0.5 text-xs text-ink/50">
             {formatDateTime(order.created_at)}
             {order.place_label ? ` · ${order.place_label}` : ""}
+            {order.source === "online" ? " · Website" : ""}
           </p>
-          {cashierOps ? (
+          {order.source === "online" || order.guest_phone ? (
+            <p className="mt-0.5 text-xs text-ink/55">
+              Guest: {order.guest_name || order.cashier_name}
+              {order.guest_phone ? ` · ${order.guest_phone}` : ""}
+            </p>
+          ) : cashierOps ? (
             <p className="mt-0.5 text-xs text-ink/45">
               {order.cashier_name}
               {paid
@@ -570,6 +576,12 @@ function OrderDetailPanel({
           {order.cancel_requested_by
             ? ` by ${order.cancel_requested_by}`
             : ""}
+        </p>
+      ) : null}
+
+      {order.guest_note ? (
+        <p className="mt-2 rounded-xl bg-stone/50 px-2.5 py-1.5 text-xs text-ink/65">
+          Guest note: {order.guest_note}
         </p>
       ) : null}
 

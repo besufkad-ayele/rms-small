@@ -304,19 +304,25 @@ export async function onboardOrganization(input: {
   financeEnabled: boolean;
   menuEnabled?: boolean;
   orderingEnabled?: boolean;
+  kitchenEnabled?: boolean;
   hrEnabled?: boolean;
+  onlineEnabled?: boolean;
   licenseFile?: File | null;
   idFile?: File | null;
 }) {
   const menu = input.menuEnabled ?? input.inventoryEnabled;
   const ordering = input.orderingEnabled ?? input.inventoryEnabled;
+  const kitchen = input.kitchenEnabled ?? ordering;
   const hr = input.hrEnabled ?? true;
+  const online = input.onlineEnabled ?? false;
   if (
     !input.inventoryEnabled &&
     !input.financeEnabled &&
     !menu &&
     !ordering &&
-    !hr
+    !hr &&
+    !kitchen &&
+    !online
   ) {
     return { error: "Enable at least one module." };
   }
@@ -363,6 +369,15 @@ export async function onboardOrganization(input: {
   });
 
   if (error) return { error: error.message };
+
+  await supabase
+    .from("subscriptions")
+    .update({
+      kitchen_enabled: kitchen,
+      online_enabled: online,
+    })
+    .eq("organization_id", orgId);
+
   return { organizationId: orgId as string };
 }
 
@@ -373,6 +388,7 @@ export type ModuleFlags = {
   inventoryEnabled: boolean;
   financeEnabled: boolean;
   hrEnabled: boolean;
+  onlineEnabled?: boolean;
 };
 
 export async function updateModules(
@@ -394,6 +410,8 @@ export async function submitPaymentProof(input: {
   file: File;
   monthsRequested?: number;
   modules?: Partial<ModuleFlags>;
+  extraStaffSeats?: number;
+  addonCodes?: string[];
   packageCode?: string | null;
   expectedAmountEtb?: number | null;
   amountBreakdown?: Record<string, unknown> | null;
@@ -431,6 +449,10 @@ export async function submitPaymentProof(input: {
     inventory_enabled: input.modules?.inventoryEnabled ?? null,
     finance_enabled: input.modules?.financeEnabled ?? null,
     hr_enabled: input.modules?.hrEnabled ?? null,
+    online_enabled: input.modules?.onlineEnabled ?? null,
+    extra_staff_seats:
+      input.extraStaffSeats != null ? Number(input.extraStaffSeats) : null,
+    addon_codes: input.addonCodes || null,
     package_code: input.packageCode || null,
     expected_amount_etb:
       input.expectedAmountEtb != null ? Number(input.expectedAmountEtb) : null,

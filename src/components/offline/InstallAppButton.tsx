@@ -8,7 +8,15 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
-export function InstallAppButton({ className }: { className?: string }) {
+export function InstallAppButton({
+  className,
+  tone = "dark",
+  label = "Install app",
+}: {
+  className?: string;
+  tone?: "dark" | "light";
+  label?: string;
+}) {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(
     null,
   );
@@ -57,13 +65,23 @@ export function InstallAppButton({ className }: { className?: string }) {
       <button
         type="button"
         onClick={() => void install()}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gold/40 bg-gold/15 px-3 py-2 text-xs font-semibold text-gold"
+        className={
+          tone === "light"
+            ? "inline-flex w-full items-center justify-center gap-2 rounded-xl border border-teal/30 bg-teal/10 px-3 py-2 text-xs font-semibold text-teal"
+            : "inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gold/40 bg-gold/15 px-3 py-2 text-xs font-semibold text-gold"
+        }
       >
         <Download className="h-3.5 w-3.5" />
-        Install app
+        {label}
       </button>
       {showIosHelp ? (
-        <p className="mt-2 text-[11px] leading-snug text-white/70">
+        <p
+          className={
+            tone === "light"
+              ? "mt-2 text-[11px] leading-snug text-ink/60"
+              : "mt-2 text-[11px] leading-snug text-white/70"
+          }
+        >
           On iPhone/iPad: tap Share, then &quot;Add to Home Screen&quot;.
         </p>
       ) : null}

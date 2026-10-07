@@ -12,6 +12,8 @@ import {
   StatusPill,
   type ModuleState,
 } from "./platform-ui";
+import { PaymentAdminActions } from "./PaymentAdmin";
+import { ActionButton } from "./feedback";
 
 export function PaymentsSection({
   proofs,
@@ -23,6 +25,10 @@ export function PaymentsSection({
   proofPkg,
   setProofPkg,
   busy,
+  setBusy,
+  setError,
+  flashOk,
+  onChanged,
   onApprove,
   onReject,
   onOpenOrg,
@@ -36,8 +42,12 @@ export function PaymentsSection({
   proofPkg: Record<string, string>;
   setProofPkg: Dispatch<SetStateAction<Record<string, string>>>;
   busy: boolean;
-  onApprove: (p: PaymentProofRow) => void;
-  onReject: (p: PaymentProofRow) => void;
+  setBusy: (v: boolean) => void;
+  setError: (v: string | null) => void;
+  flashOk: (msg: string) => Promise<void>;
+  onChanged: () => Promise<void>;
+  onApprove: (p: PaymentProofRow) => Promise<void> | void;
+  onReject: (p: PaymentProofRow) => Promise<void> | void;
   onOpenOrg: (id: string) => void;
 }) {
   return (
@@ -203,22 +213,22 @@ export function PaymentsSection({
                     />
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
+                    <ActionButton
                       disabled={busy}
-                      onClick={() => onApprove(proof)}
+                      pendingLabel="Verifying…"
+                      onAction={() => onApprove(proof)}
                       className="rounded-xl bg-teal px-3 py-2 text-xs font-semibold text-white"
                     >
                       Verify & extend
-                    </button>
-                    <button
-                      type="button"
+                    </ActionButton>
+                    <ActionButton
                       disabled={busy}
-                      onClick={() => onReject(proof)}
+                      pendingLabel="Rejecting…"
+                      onAction={() => onReject(proof)}
                       className="rounded-xl border border-coral/30 bg-coral/10 px-3 py-2 text-xs font-semibold text-coral"
                     >
                       Reject
-                    </button>
+                    </ActionButton>
                   </div>
                 </div>
               ) : (
@@ -234,6 +244,16 @@ export function PaymentsSection({
             {proof.notes ? (
               <p className="mt-2 text-xs text-ink/55">{String(proof.notes)}</p>
             ) : null}
+            <div className="mt-3 border-t border-ink/5 pt-3">
+              <PaymentAdminActions
+                proof={proof}
+                busy={busy}
+                setBusy={setBusy}
+                setError={setError}
+                flashOk={flashOk}
+                onChanged={onChanged}
+              />
+            </div>
           </article>
         );
       })}
