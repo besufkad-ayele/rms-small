@@ -1,4 +1,5 @@
 import type { User } from "@supabase/supabase-js";
+import { db } from "@/lib/db";
 import { createClient } from "@/lib/supabase/client";
 import type {
   Membership,
@@ -73,9 +74,40 @@ export async function signIn(email: string, password: string) {
   return { user: data.user, session: data.session };
 }
 
+/** Drop browser auth tokens and the local device session. */
+async function clearLocalAuthData() {
+  try {
+    await db.session.delete("current");
+  } catch {
+    /* IndexedDB may be blocked */
+  }
+  if (typeof window === "undefined") return;
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (
+        key &&
+        (key.startsWith("sb-") || key.includes("supabase.auth"))
+      ) {
+        keys.push(key);
+      }
+    }
+    for (const key of keys) window.localStorage.removeItem(key);
+    window.sessionStorage.removeItem("aramis-onboarding");
+  } catch {
+    /* private mode / storage blocked */
+  }
+}
+
 export async function signOut() {
-  const supabase = createClient();
-  await supabase.auth.signOut();
+  try {
+    const supabase = createClient();
+    await supabase.auth.signOut({ scope: "local" });
+  } catch (err) {
+    console.error("Supabase sign out failed", err);
+  }
+  await clearLocalAuthData();
 }
 
 /** Network or server hiccup, as opposed to Supabase saying the session is gone. */

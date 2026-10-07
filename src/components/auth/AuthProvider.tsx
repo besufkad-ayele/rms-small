@@ -368,6 +368,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await signOut();
+    lastRefreshAt.current = 0;
     setUser(null);
     setProfile(null);
     setTenant(null);
