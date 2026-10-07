@@ -115,6 +115,7 @@ CREATE POLICY memberships_insert_owner ON public.memberships FOR INSERT
 -- ═══════════════════════════════════════
 
 DROP POLICY IF EXISTS subscriptions_insert ON public.subscriptions;
+DROP POLICY IF EXISTS subscriptions_insert_platform ON public.subscriptions;
 CREATE POLICY subscriptions_insert_platform ON public.subscriptions FOR INSERT
   WITH CHECK (public.is_platform_admin());
 
@@ -159,6 +160,10 @@ $$;
 -- ═══════════════════════════════════════
 
 DROP POLICY IF EXISTS inv_all ON public.inventory_items;
+DROP POLICY IF EXISTS inv_select ON public.inventory_items;
+DROP POLICY IF EXISTS inv_write ON public.inventory_items;
+DROP POLICY IF EXISTS inv_update ON public.inventory_items;
+DROP POLICY IF EXISTS inv_delete ON public.inventory_items;
 CREATE POLICY inv_select ON public.inventory_items FOR SELECT
   USING (public.org_feature_ok(organization_id, 'inventory', 'menu', 'order', 'finance'));
 CREATE POLICY inv_write ON public.inventory_items FOR INSERT
@@ -185,6 +190,10 @@ CREATE POLICY inv_hist_insert ON public.inventory_cost_history FOR INSERT
   ));
 
 DROP POLICY IF EXISTS menu_all ON public.menu_items;
+DROP POLICY IF EXISTS menu_select ON public.menu_items;
+DROP POLICY IF EXISTS menu_insert ON public.menu_items;
+DROP POLICY IF EXISTS menu_update ON public.menu_items;
+DROP POLICY IF EXISTS menu_delete ON public.menu_items;
 CREATE POLICY menu_select ON public.menu_items FOR SELECT
   USING (public.org_feature_ok(organization_id, 'menu', 'order', 'kitchen', 'inventory'));
 CREATE POLICY menu_insert ON public.menu_items FOR INSERT
@@ -196,6 +205,10 @@ CREATE POLICY menu_delete ON public.menu_items FOR DELETE
   USING (public.org_feature_ok(organization_id, 'menu'));
 
 DROP POLICY IF EXISTS recipes_all ON public.menu_recipes;
+DROP POLICY IF EXISTS recipes_select ON public.menu_recipes;
+DROP POLICY IF EXISTS recipes_write ON public.menu_recipes;
+DROP POLICY IF EXISTS recipes_update ON public.menu_recipes;
+DROP POLICY IF EXISTS recipes_delete ON public.menu_recipes;
 CREATE POLICY recipes_select ON public.menu_recipes FOR SELECT
   USING (EXISTS (
     SELECT 1 FROM public.menu_items m
@@ -222,6 +235,10 @@ CREATE POLICY recipes_delete ON public.menu_recipes FOR DELETE
   ));
 
 DROP POLICY IF EXISTS orders_all ON public.sale_orders;
+DROP POLICY IF EXISTS orders_select ON public.sale_orders;
+DROP POLICY IF EXISTS orders_insert ON public.sale_orders;
+DROP POLICY IF EXISTS orders_update ON public.sale_orders;
+DROP POLICY IF EXISTS orders_delete ON public.sale_orders;
 CREATE POLICY orders_select ON public.sale_orders FOR SELECT
   USING (public.org_feature_ok(organization_id, 'order', 'kitchen', 'finance'));
 CREATE POLICY orders_insert ON public.sale_orders FOR INSERT
@@ -233,6 +250,10 @@ CREATE POLICY orders_delete ON public.sale_orders FOR DELETE
   USING (public.org_feature_ok(organization_id, 'order', 'finance'));
 
 DROP POLICY IF EXISTS order_lines_all ON public.sale_order_lines;
+DROP POLICY IF EXISTS order_lines_select ON public.sale_order_lines;
+DROP POLICY IF EXISTS order_lines_insert ON public.sale_order_lines;
+DROP POLICY IF EXISTS order_lines_update ON public.sale_order_lines;
+DROP POLICY IF EXISTS order_lines_delete ON public.sale_order_lines;
 CREATE POLICY order_lines_select ON public.sale_order_lines FOR SELECT
   USING (EXISTS (
     SELECT 1 FROM public.sale_orders o
@@ -259,6 +280,10 @@ CREATE POLICY order_lines_delete ON public.sale_order_lines FOR DELETE
   ));
 
 DROP POLICY IF EXISTS day_closes_all ON public.day_closes;
+DROP POLICY IF EXISTS day_closes_select ON public.day_closes;
+DROP POLICY IF EXISTS day_closes_write ON public.day_closes;
+DROP POLICY IF EXISTS day_closes_update ON public.day_closes;
+DROP POLICY IF EXISTS day_closes_delete ON public.day_closes;
 CREATE POLICY day_closes_select ON public.day_closes FOR SELECT
   USING (public.org_feature_ok(organization_id, 'finance'));
 CREATE POLICY day_closes_write ON public.day_closes FOR INSERT
@@ -270,6 +295,10 @@ CREATE POLICY day_closes_delete ON public.day_closes FOR DELETE
   USING (public.org_feature_ok(organization_id, 'finance'));
 
 DROP POLICY IF EXISTS x_reports_all ON public.x_reports;
+DROP POLICY IF EXISTS x_reports_select ON public.x_reports;
+DROP POLICY IF EXISTS x_reports_write ON public.x_reports;
+DROP POLICY IF EXISTS x_reports_update ON public.x_reports;
+DROP POLICY IF EXISTS x_reports_delete ON public.x_reports;
 CREATE POLICY x_reports_select ON public.x_reports FOR SELECT
   USING (public.org_feature_ok(organization_id, 'finance'));
 CREATE POLICY x_reports_write ON public.x_reports FOR INSERT
@@ -281,6 +310,10 @@ CREATE POLICY x_reports_delete ON public.x_reports FOR DELETE
   USING (public.org_feature_ok(organization_id, 'finance'));
 
 DROP POLICY IF EXISTS paid_bills_all ON public.paid_bills;
+DROP POLICY IF EXISTS paid_bills_select ON public.paid_bills;
+DROP POLICY IF EXISTS paid_bills_write ON public.paid_bills;
+DROP POLICY IF EXISTS paid_bills_update ON public.paid_bills;
+DROP POLICY IF EXISTS paid_bills_delete ON public.paid_bills;
 CREATE POLICY paid_bills_select ON public.paid_bills FOR SELECT
   USING (public.org_feature_ok(organization_id, 'finance'));
 CREATE POLICY paid_bills_write ON public.paid_bills FOR INSERT
@@ -292,6 +325,10 @@ CREATE POLICY paid_bills_delete ON public.paid_bills FOR DELETE
   USING (public.org_feature_ok(organization_id, 'finance'));
 
 DROP POLICY IF EXISTS inventory_units_all ON public.inventory_units;
+DROP POLICY IF EXISTS inventory_units_select ON public.inventory_units;
+DROP POLICY IF EXISTS inventory_units_write ON public.inventory_units;
+DROP POLICY IF EXISTS inventory_units_update ON public.inventory_units;
+DROP POLICY IF EXISTS inventory_units_delete ON public.inventory_units;
 CREATE POLICY inventory_units_select ON public.inventory_units FOR SELECT
   USING (public.org_feature_ok(organization_id, 'inventory', 'menu', 'order'));
 CREATE POLICY inventory_units_write ON public.inventory_units FOR INSERT
@@ -303,6 +340,10 @@ CREATE POLICY inventory_units_delete ON public.inventory_units FOR DELETE
   USING (public.org_feature_ok(organization_id, 'inventory'));
 
 DROP POLICY IF EXISTS inventory_suppliers_all ON public.inventory_suppliers;
+DROP POLICY IF EXISTS inventory_suppliers_select ON public.inventory_suppliers;
+DROP POLICY IF EXISTS inventory_suppliers_write ON public.inventory_suppliers;
+DROP POLICY IF EXISTS inventory_suppliers_update ON public.inventory_suppliers;
+DROP POLICY IF EXISTS inventory_suppliers_delete ON public.inventory_suppliers;
 CREATE POLICY inventory_suppliers_select ON public.inventory_suppliers FOR SELECT
   USING (public.org_feature_ok(organization_id, 'inventory'));
 CREATE POLICY inventory_suppliers_write ON public.inventory_suppliers FOR INSERT
@@ -314,6 +355,10 @@ CREATE POLICY inventory_suppliers_delete ON public.inventory_suppliers FOR DELET
   USING (public.org_feature_ok(organization_id, 'inventory'));
 
 DROP POLICY IF EXISTS inventory_movements_all ON public.inventory_movements;
+DROP POLICY IF EXISTS inventory_movements_select ON public.inventory_movements;
+DROP POLICY IF EXISTS inventory_movements_write ON public.inventory_movements;
+DROP POLICY IF EXISTS inventory_movements_update ON public.inventory_movements;
+DROP POLICY IF EXISTS inventory_movements_delete ON public.inventory_movements;
 CREATE POLICY inventory_movements_select ON public.inventory_movements FOR SELECT
   USING (public.org_feature_ok(organization_id, 'inventory', 'finance'));
 CREATE POLICY inventory_movements_write ON public.inventory_movements FOR INSERT

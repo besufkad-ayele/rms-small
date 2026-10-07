@@ -2,6 +2,7 @@
 
 import { Download } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useI18n } from "@/components/i18n/LocaleProvider";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -11,12 +12,14 @@ interface BeforeInstallPromptEvent extends Event {
 export function InstallAppButton({
   className,
   tone = "dark",
-  label = "Install app",
+  label,
 }: {
   className?: string;
   tone?: "dark" | "light";
   label?: string;
 }) {
+  const { t } = useI18n();
+  const buttonLabel = label ?? t("install.app");
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(
     null,
   );
@@ -71,8 +74,8 @@ export function InstallAppButton({
             : "inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gold/40 bg-gold/15 px-3 py-2 text-xs font-semibold text-gold"
         }
       >
-        <Download className="h-3.5 w-3.5" />
-        {label}
+        <Download className="h-3.5 w-3.5" aria-hidden />
+        {buttonLabel}
       </button>
       {showIosHelp ? (
         <p
@@ -82,7 +85,7 @@ export function InstallAppButton({
               : "mt-2 text-[11px] leading-snug text-white/70"
           }
         >
-          On iPhone/iPad: tap Share, then &quot;Add to Home Screen&quot;.
+          {t("install.ios")}
         </p>
       ) : null}
     </div>

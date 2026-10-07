@@ -210,7 +210,7 @@ export async function placePublicOrderAction(input: {
       source: "online",
       guest_name: name,
       guest_phone: phone,
-          guest_note: note,
+      guest_note: note,
       place_label: "Online",
       vat_percent: bill.vatPercent,
       service_percent: bill.servicePercent,

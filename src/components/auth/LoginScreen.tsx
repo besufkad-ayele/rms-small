@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { AramisLogo } from "@/components/brand/AramisLogo";
+import { useI18n } from "@/components/i18n/LocaleProvider";
+import { LocaleToggle } from "@/components/i18n/LocaleToggle";
 
 export function LoginScreen({
   variant = "default",
@@ -14,6 +16,7 @@ export function LoginScreen({
   variant?: "default" | "staff";
 }) {
   const { ready, login } = useAuth();
+  const { t } = useI18n();
   const router = useRouter();
   const search = useSearchParams();
   const justApproved = search.get("approved") === "1";
@@ -24,14 +27,10 @@ export function LoginScreen({
   const isStaff = variant === "staff";
 
   const subtitle = useMemo(() => {
-    if (isStaff) {
-      return "Use the email and password your restaurant owner created for you.";
-    }
-    if (justApproved) {
-      return "Your account was approved. Sign in with the password you chose when you signed up.";
-    }
-    return "Owners and staff sign in here with the email and password from signup (or staff invite).";
-  }, [justApproved, isStaff]);
+    if (isStaff) return t("auth.staffSubtitle");
+    if (justApproved) return t("auth.approvedSubtitle");
+    return t("auth.defaultSubtitle");
+  }, [justApproved, isStaff, t]);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -53,7 +52,7 @@ export function LoginScreen({
   if (!ready) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-ink text-stone">
-        <p className="text-sm text-stone/70">Loading…</p>
+        <p className="text-sm text-stone/70">{t("auth.loading")}</p>
       </div>
     );
   }
@@ -67,51 +66,60 @@ export function LoginScreen({
             <AramisLogo priority className="h-12 sm:h-14" />
           </div>
           <h1 className="mt-5 font-display text-4xl tracking-tight text-white sm:text-5xl">
-            {isStaff ? "Staff sign in" : "Sign in"}
+            {isStaff ? t("auth.staffSignIn") : t("auth.signIn")}
           </h1>
           <p className="mx-auto mt-3 max-w-sm text-sm text-stone/70">{subtitle}</p>
+          <div className="mt-4 flex justify-center">
+            <LocaleToggle tone="dark" />
+          </div>
         </div>
 
         {justApproved && !isStaff ? (
           <div className="mb-4 rounded-2xl border border-teal/40 bg-teal/15 px-4 py-3 text-center text-sm text-teal">
-            Access granted — sign in with the password you created at signup.
+            {t("auth.approvedBanner")}
           </div>
         ) : null}
 
         {isStaff ? (
           <div className="mb-4 rounded-2xl border border-gold/30 bg-gold/10 px-4 py-3 text-center text-sm text-gold">
-            You’ll only see the restaurant and features your owner enabled for
-            you.
+            {t("auth.staffBanner")}
           </div>
         ) : null}
 
         <div className="rounded-3xl border border-white/10 bg-white/5 p-5 shadow-2xl backdrop-blur-md sm:p-8">
           <form className="space-y-3" onSubmit={(e) => void onSubmit(e)}>
             <label className="block text-sm">
-              <span className="mb-1.5 block text-stone/70">Email</span>
+              <span className="mb-1.5 block text-stone/70">{t("auth.email")}</span>
               <input
                 name="email"
                 type="email"
                 required
                 autoComplete="email"
+                autoCapitalize="none"
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? "login-error" : undefined}
                 className="w-full rounded-xl border border-white/15 bg-ink/40 px-3 py-3 text-stone outline-none ring-teal/40 focus:ring-2"
               />
             </label>
             <label className="block text-sm">
-              <span className="mb-1.5 block text-stone/70">Password</span>
+              <span className="mb-1.5 block text-stone/70">{t("auth.password")}</span>
               <div className="relative">
                 <input
                   name="password"
                   type={showPassword ? "text" : "password"}
                   required
                   autoComplete="current-password"
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? "login-error" : undefined}
                   className="w-full rounded-xl border border-white/15 bg-ink/40 px-3 py-3 pr-11 text-stone outline-none ring-teal/40 focus:ring-2"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
                   className="absolute inset-y-0 right-0 flex items-center px-3 text-stone/55 hover:text-stone"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-label={
+                    showPassword ? t("auth.hidePassword") : t("auth.showPassword")
+                  }
                 >
                   {showPassword ? (
                     <EyeOff className="h-4 w-4" />
@@ -126,12 +134,16 @@ export function LoginScreen({
               disabled={busy}
               className="mt-2 w-full rounded-xl bg-teal px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-teal/25 transition hover:bg-teal/90 disabled:opacity-60"
             >
-              {busy ? "Please wait…" : "Sign in"}
+              {busy ? t("auth.wait") : t("auth.submit")}
             </button>
           </form>
 
           {error ? (
-            <p className="mt-4 rounded-xl bg-coral/20 px-3 py-2 text-sm text-coral">
+            <p
+              id="login-error"
+              role="alert"
+              className="mt-4 rounded-xl bg-coral/20 px-3 py-2 text-sm text-coral"
+            >
               {error}
             </p>
           ) : null}
@@ -139,24 +151,24 @@ export function LoginScreen({
           <p className="mt-6 text-center text-sm text-stone/65">
             {isStaff ? (
               <>
-                Business owner?{" "}
+                {t("auth.ownerPrompt")}{" "}
                 <Link href="/login" className="font-medium text-gold underline">
-                  Owner sign in
+                  {t("auth.ownerSignIn")}
                 </Link>
               </>
             ) : (
               <>
-                Team member?{" "}
+                {t("auth.staffPrompt")}{" "}
                 <Link
                   href="/staff-login"
                   className="font-medium text-gold underline"
                 >
-                  Staff sign in
+                  {t("auth.staffSignIn")}
                 </Link>
                 <span className="mx-2 text-stone/40">·</span>
-                New here?{" "}
+                {t("auth.newHere")}{" "}
                 <Link href="/signup" className="font-medium text-gold underline">
-                  Create account
+                  {t("auth.createAccount")}
                 </Link>
               </>
             )}

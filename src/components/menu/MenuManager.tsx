@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Camera, ImagePlus, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
+import { FieldLabel } from "@/components/ui/FieldLabel";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import {
@@ -37,6 +38,17 @@ import {
   formatBytes,
   uploadMenuImage,
 } from "@/lib/menu-image";
+import {
+  optionalText,
+  requireNumber,
+  requireText,
+} from "@/lib/form-sanitize";
+import {
+  PREP_CHOICES,
+  prepKindForItem,
+  withPrepKind,
+  type PrepKind,
+} from "@/lib/prep-station";
 import type { MenuCategory } from "@/lib/tenant";
 import { cn, formatMoney } from "@/lib/utils";
 
@@ -54,6 +66,7 @@ export function MenuManager() {
   const [price, setPrice] = useState(0);
   const [available, setAvailable] = useState(true);
   const [details, setDetails] = useState<MenuDetails>(EMPTY_MENU_DETAILS);
+  const [prep, setPrep] = useState<PrepKind | "">("");
   const [tags, setTags] = useState<string[]>([]);
   const [customTag, setCustomTag] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -111,6 +124,7 @@ export function MenuManager() {
     setPrice(0);
     setAvailable(true);
     setDetails(EMPTY_MENU_DETAILS);
+    setPrep("");
     setTags([]);
     setCustomTag("");
     setImageFile(null);
@@ -155,7 +169,8 @@ export function MenuManager() {
     setPrice(item.price);
     setAvailable(item.available);
     setDetails(parseMenuDescription(item.description));
-    setTags(normalizeTags(item.tags));
+    setPrep(prepKindForItem(item));
+    setTags(normalizeTags(item.tags).filter((tag) => tag !== "food" && tag !== "drink"));
     setRecipe(item.recipe || []);
     setImageFile(null);
     setImagePreview(item.image_url || null);
@@ -177,15 +192,43 @@ export function MenuManager() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setMessage(null);
+    if (prep !== "food" && prep !== "drink") {
+      setMessage(
+        "Choose Food or Drink. Drinks go to the barista. Food goes to the kitchen.",
+      );
+      return;
+    }
+    let cleanName = "";
+    let cleanPrice = 0;
+    try {
+      cleanName = requireText("Name", name, 80);
+      cleanPrice = requireNumber("Price", Number(price), { min: 0 });
+      if (
+        details.prepMinutes != null &&
+        (!Number.isFinite(details.prepMinutes) || details.prepMinutes < 0)
+      ) {
+        throw new Error("Prep time must be zero or more.");
+      }
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Check the form and try again.");
+      return;
+    }
+    const cleanDetails = {
+      ...details,
+      summary: optionalText(details.summary, 400),
+      ingredients: optionalText(details.ingredients, 300),
+      portion: optionalText(details.portion, 80),
+      kitchenNote: optionalText(details.kitchenNote, 200),
+    };
     try {
       const base = {
         id: editing?.id,
-        name,
+        name: cleanName,
         category,
-        price: Number(price),
+        price: cleanPrice,
         available,
-        description: composeMenuDescription(details),
-        tags: normalizeTags(tags),
+        description: composeMenuDescription(cleanDetails),
+        tags: withPrepKind(normalizeTags(tags), prep),
         recipe,
         image_url: editing?.image_url ?? null,
       };
@@ -255,7 +298,7 @@ export function MenuManager() {
           </h2>
           <form className="mt-4 space-y-3" onSubmit={(e) => void onSubmit(e)}>
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">Name *</span>
+              <FieldLabel required>Name</FieldLabel>
               <input
                 required
                 className="field"
@@ -264,9 +307,35 @@ export function MenuManager() {
                 onChange={(e) => setName(e.target.value)}
               />
             </label>
+            <div>
+              <FieldLabel required>Goes to</FieldLabel>
+              <div className="grid grid-cols-2 gap-2">
+                {PREP_CHOICES.map((choice) => {
+                  const on = prep === choice.id;
+                  return (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      onClick={() => setPrep(choice.id)}
+                      className={cn(
+                        "rounded-2xl border px-3 py-2.5 text-left text-sm",
+                        on
+                          ? "border-teal bg-teal/10"
+                          : "border-ink/10 bg-white hover:bg-ink/5",
+                      )}
+                    >
+                      <span className="font-medium">{choice.label}</span>
+                      <span className="mt-0.5 block text-xs text-ink/55">
+                        {choice.hint}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm">
-                <span className="mb-1 block text-ink/60">Category</span>
+                <FieldLabel required>Category</FieldLabel>
                 <select
                   className="field"
                   value={category}
@@ -280,7 +349,7 @@ export function MenuManager() {
                 </select>
               </label>
               <label className="block text-sm">
-                <span className="mb-1 block text-ink/60">Price (ETB)</span>
+                <FieldLabel required>Price (ETB)</FieldLabel>
                 <input
                   required
                   type="number"
@@ -294,11 +363,9 @@ export function MenuManager() {
             </div>
 
             <div>
-              <p className="mb-1.5 text-sm text-ink/60">
-                Tags{" "}
-                <span className="text-ink/40">
-                  (starters sort to the top · traditional, spicy, …)
-                </span>
+              <FieldLabel>Tags</FieldLabel>
+              <p className="-mt-1 mb-1.5 text-xs text-ink/40">
+                Starters sort to the top. Food and Drink are chosen above.
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {MENU_TAGS.map((t) => {
@@ -365,9 +432,7 @@ export function MenuManager() {
             </div>
 
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">
-                Description for customers
-              </span>
+              <FieldLabel>Description for customers</FieldLabel>
               <textarea
                 className="field min-h-20"
                 placeholder="What it is, how it tastes, what comes with it"
@@ -377,7 +442,7 @@ export function MenuManager() {
             </label>
 
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">Ingredients</span>
+              <FieldLabel>Ingredients</FieldLabel>
               <input
                 className="field"
                 placeholder="e.g. pasta, tomato, onion, garlic, basil"
@@ -388,7 +453,7 @@ export function MenuManager() {
 
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm">
-                <span className="mb-1 block text-ink/60">Portion / size</span>
+                <FieldLabel>Portion / size</FieldLabel>
                 <input
                   className="field"
                   placeholder="e.g. 1 plate, 250 ml"
@@ -397,7 +462,7 @@ export function MenuManager() {
                 />
               </label>
               <label className="block text-sm">
-                <span className="mb-1 block text-ink/60">Prep time (min)</span>
+                <FieldLabel>Prep time (min)</FieldLabel>
                 <input
                   type="number"
                   min={0}
@@ -416,7 +481,7 @@ export function MenuManager() {
             </div>
 
             <div>
-              <p className="mb-1.5 text-sm text-ink/60">Allergens</p>
+              <FieldLabel>Allergens</FieldLabel>
               <div className="flex flex-wrap gap-1.5">
                 {MENU_ALLERGENS.map((a) => {
                   const on = tags.includes(a.id);
@@ -440,7 +505,7 @@ export function MenuManager() {
             </div>
 
             <div>
-              <p className="mb-1.5 text-sm text-ink/60">Spice level</p>
+              <FieldLabel>Spice level</FieldLabel>
               <div className="flex flex-wrap gap-1.5">
                 {MENU_SPICE_LEVELS.map((s) => {
                   const current =
@@ -466,10 +531,10 @@ export function MenuManager() {
             </div>
 
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">
-                Kitchen note{" "}
-                <span className="text-ink/40">(staff only, shown on tickets)</span>
-              </span>
+              <FieldLabel>Kitchen note</FieldLabel>
+              <p className="-mt-1 mb-1 text-xs text-ink/40">
+                Staff only, shown on tickets
+              </p>
               <input
                 className="field"
                 placeholder="e.g. Plate warm, add basil on top"
@@ -479,13 +544,10 @@ export function MenuManager() {
             </label>
 
             <div className="block text-sm">
-              <span className="mb-1 block text-ink/60">
-                Food photo{" "}
-                <span className="text-ink/40">
-                  (optional · saved as WebP under{" "}
-                  {formatBytes(MENU_IMAGE_MAX_BYTES)})
-                </span>
-              </span>
+              <FieldLabel>Food photo</FieldLabel>
+              <p className="-mt-1 mb-1 text-xs text-ink/40">
+                Saved as WebP under {formatBytes(MENU_IMAGE_MAX_BYTES)}
+              </p>
               <div className="grid grid-cols-2 gap-2">
                 <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-ink/20 bg-white px-3 py-2.5 text-xs font-medium text-ink/70">
                   <Camera className="h-4 w-4" />
@@ -540,7 +602,9 @@ export function MenuManager() {
               Available on POS
             </label>
             <div className="rounded-2xl border border-ink/8 bg-stone/50 p-3">
-              <p className="text-sm font-medium">Recipe → inventory</p>
+              <FieldLabel className="font-medium text-ink">
+                Recipe → inventory
+              </FieldLabel>
               <div className="mt-2 grid grid-cols-[1fr_auto_auto] gap-2">
                 <select
                   className="field"
@@ -626,7 +690,17 @@ export function MenuManager() {
               </button>
             ) : null}
             {message ? (
-              <p className="text-center text-sm text-teal">{message}</p>
+              <p
+                className={cn(
+                  "text-center text-sm",
+                  /^(Updated|Added|Saved offline)/.test(message) ||
+                    message.startsWith("Item saved")
+                    ? "text-teal"
+                    : "text-coral",
+                )}
+              >
+                {message}
+              </p>
             ) : null}
           </form>
         </section>
@@ -678,7 +752,12 @@ export function MenuManager() {
                     <span className="rounded-full bg-ink/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink/55">
                       {categoryLabel(item.category)}
                     </span>
-                    {(item.tags || []).map((t) => (
+                    <span className="rounded-full bg-teal/10 px-2 py-0.5 text-[10px] font-medium text-teal">
+                      {prepKindForItem(item) === "drink" ? "Barista" : "Kitchen"}
+                    </span>
+                    {(item.tags || [])
+                      .filter((t) => t !== "food" && t !== "drink")
+                      .map((t) => (
                       <span
                         key={t}
                         className={cn(

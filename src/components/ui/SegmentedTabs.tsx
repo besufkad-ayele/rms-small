@@ -38,8 +38,30 @@ export function SegmentedTabs<T extends string>({
             key={t.id}
             type="button"
             role="tab"
+            id={`seg-tab-${t.id}`}
             aria-selected={active}
+            tabIndex={active ? 0 : -1}
             onClick={() => onChange(t.id)}
+            onKeyDown={(e) => {
+              const i = tabs.findIndex((tab) => tab.id === value);
+              if (i < 0) return;
+              let next: T | null = null;
+              if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                next = tabs[(i + 1) % tabs.length].id;
+              } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+                next = tabs[(i - 1 + tabs.length) % tabs.length].id;
+              } else if (e.key === "Home") {
+                next = tabs[0].id;
+              } else if (e.key === "End") {
+                next = tabs[tabs.length - 1].id;
+              }
+              if (!next) return;
+              e.preventDefault();
+              onChange(next);
+              requestAnimationFrame(() => {
+                document.getElementById(`seg-tab-${next}`)?.focus();
+              });
+            }}
             className={cn(
               "inline-flex flex-1 items-center justify-center gap-2 rounded-xl font-medium transition sm:flex-none",
               size === "md" && "px-3 py-2.5 text-sm",

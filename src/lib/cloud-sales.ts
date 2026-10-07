@@ -332,6 +332,40 @@ export async function updateKitchenRound(
   });
 }
 
+/** Move only the lines on one board (barista or kitchen) inside a send. */
+export async function updateKitchenLines(
+  orgId: string,
+  orderId: string,
+  lineIds: string[],
+  status: KitchenLineStatus,
+) {
+  const ids = [...new Set(lineIds.filter(Boolean))];
+  if (ids.length === 0) throw new Error("This ticket has no items to update.");
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("sale_orders")
+    .select("*, sale_order_lines(*)")
+    .eq("id", orderId)
+    .eq("organization_id", orgId)
+    .neq("status", "canceled")
+    .single();
+  if (error || !data) throw new Error(error?.message || "Order not found");
+  const current = mapOrder(data as Record<string, unknown>);
+  const { error: lineError } = await supabase
+    .from("sale_order_lines")
+    .update({ kitchen_status: status })
+    .eq("order_id", orderId)
+    .in("id", ids);
+  if (lineError) throw new Error(lineError.message);
+  const idSet = new Set(ids);
+  const nextLines = orderLines(current).map((line) =>
+    line.id && idSet.has(line.id) ? { ...line, kitchen_status: status } : line,
+  );
+  await updateSaleOrderRow(orgId, orderId, {
+    status: deriveOrderStatus(nextLines, current.status),
+  });
+}
+
 /** Treat missing payment_status (pre-migration rows) as paid. */
 export function isOrderPaid(order: {
   payment_status?: SalePaymentStatus | null;
@@ -608,7 +642,6 @@ export async function markOrderPaid(input: {
   paymentReference?: string;
   paymentProofUrl?: string | null;
 }) {
-  const supabase = createClient();
   const now = new Date().toISOString();
   const data = await updateSaleOrderRow(input.orgId, input.orderId, {
     payment_status: "paid",

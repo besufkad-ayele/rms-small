@@ -1,11 +1,24 @@
 "use client";
 
+import { useEffect } from "react";
 import { CloudOff, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { useI18n } from "@/components/i18n/LocaleProvider";
 import { useOfflineSync } from "./OfflineSyncProvider";
 import { cn } from "@/lib/utils";
 
 export function SyncSuccessDialog() {
   const { syncDialog, closeSyncDialog } = useOfflineSync();
+  const { t, locale } = useI18n();
+
+  useEffect(() => {
+    if (!syncDialog.open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeSyncDialog();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [syncDialog.open, closeSyncDialog]);
+
   if (!syncDialog.open || !syncDialog.result) return null;
 
   const { result, source } = syncDialog;
@@ -14,34 +27,43 @@ export function SyncSuccessDialog() {
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/50 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="sync-dialog-title"
+      role="presentation"
+      onClick={closeSyncDialog}
     >
-      <div className="w-full max-w-md rounded-3xl border border-ink/10 bg-white p-6 shadow-2xl">
+      <div
+        className="w-full max-w-md rounded-3xl border border-ink/10 bg-white p-6 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sync-dialog-title"
+        aria-describedby="sync-dialog-body"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div
           className={cn(
             "mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl",
             ok ? "bg-teal/15 text-teal" : "bg-coral/15 text-coral",
           )}
         >
-          <RefreshCw className="h-7 w-7" />
+          <RefreshCw className="h-7 w-7" aria-hidden />
         </div>
         <h2
           id="sync-dialog-title"
           className="text-center font-display text-2xl text-ink"
         >
-          {ok ? "Synced successfully" : "Sync finished with issues"}
+          {ok ? t("sync.okTitle") : t("sync.failTitle")}
         </h2>
-        <p className="mt-2 text-center text-sm text-ink/65">
-          {source === "auto"
-            ? "Connection is fast enough — pending work was pushed to Aramis cloud."
-            : "Manual sync completed. Failed items were retried."}
+        <p
+          id="sync-dialog-body"
+          className="mt-2 text-center text-sm text-ink/65"
+        >
+          {source === "auto" ? t("sync.autoBody") : t("sync.manualBody")}
         </p>
         <ul className="mt-4 space-y-1 rounded-2xl bg-stone/80 px-4 py-3 text-sm text-ink/80">
-          <li>Processed: {result.totalProcessed}</li>
-          <li>Synced: {result.succeeded}</li>
-          {result.failed > 0 ? <li>Failed: {result.failed}</li> : null}
+          <li>{t("sync.processed", { n: result.totalProcessed })}</li>
+          <li>{t("sync.synced", { n: result.succeeded })}</li>
+          {result.failed > 0 ? (
+            <li>{t("sync.failed", { n: result.failed })}</li>
+          ) : null}
         </ul>
         {result.errors.length > 0 ? (
           <div className="mt-3 max-h-32 space-y-1 overflow-auto rounded-xl bg-coral/10 px-3 py-2 text-xs text-coral">
@@ -52,10 +74,11 @@ export function SyncSuccessDialog() {
         ) : null}
         <button
           type="button"
+          autoFocus
           onClick={closeSyncDialog}
           className="mt-5 w-full rounded-xl bg-teal px-4 py-3 text-sm font-semibold text-white"
         >
-          OK
+          {t("sync.ok")}
         </button>
       </div>
     </div>
@@ -71,13 +94,14 @@ export function SyncControls({
 }) {
   const { connection, pendingCount, isSyncing, syncNow, lastSyncedAt } =
     useOfflineSync();
+  const { t, locale } = useI18n();
 
   const statusLabel =
     connection.status === "live"
-      ? "Live"
+      ? t("sync.live")
       : connection.status === "slow"
-        ? "Slow"
-        : "Offline";
+        ? t("sync.slow")
+        : t("sync.offline");
 
   const StatusIcon =
     connection.status === "down"
@@ -107,11 +131,11 @@ export function SyncControls({
         )}
         title={
           connection.latencyMs != null
-            ? `${connection.latencyMs} ms · checked ${connection.checkedAt}`
-            : `Checked ${connection.checkedAt}`
+            ? `${connection.latencyMs} ms · ${connection.checkedAt}`
+            : connection.checkedAt
         }
       >
-        <StatusIcon className="h-3.5 w-3.5" />
+        <StatusIcon className="h-3.5 w-3.5" aria-hidden />
         {statusLabel}
         {connection.latencyMs != null ? (
           <span className="opacity-70">{connection.latencyMs}ms</span>
@@ -123,7 +147,7 @@ export function SyncControls({
               dark ? "bg-white/15" : "bg-ink/10",
             )}
           >
-            {pendingCount} pending
+            {t("sync.pending", { n: pendingCount })}
           </span>
         ) : null}
       </div>
@@ -140,13 +164,20 @@ export function SyncControls({
           compact ? "" : "w-full",
         )}
       >
-        <RefreshCw className={cn("h-3.5 w-3.5", isSyncing && "animate-spin")} />
-        {isSyncing ? "Syncing…" : "Sync now"}
+        <RefreshCw
+          className={cn("h-3.5 w-3.5", isSyncing && "animate-spin")}
+          aria-hidden
+        />
+        {isSyncing ? t("sync.syncing") : t("sync.now")}
       </button>
 
       {!compact && lastSyncedAt ? (
         <p className={cn("text-[10px]", dark ? "text-stone/45" : "text-ink/45")}>
-          Last sync {new Date(lastSyncedAt).toLocaleTimeString("en-ET")}
+          {t("sync.last", {
+            time: new Date(lastSyncedAt).toLocaleTimeString(
+              locale === "am" ? "am-ET" : "en-ET",
+            ),
+          })}
         </p>
       ) : null}
     </div>

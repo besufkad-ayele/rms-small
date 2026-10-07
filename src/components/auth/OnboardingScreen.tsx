@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 import { AramisLogo } from "@/components/brand/AramisLogo";
+import { FieldLabel } from "@/components/ui/FieldLabel";
+import { PhoneField } from "@/components/ui/PhoneField";
 import { isOwner } from "@/lib/permissions";
+import type { PhoneAssessment } from "@/lib/phone";
 
 export function OnboardingScreen() {
   const {
@@ -34,6 +37,7 @@ export function OnboardingScreen() {
   const [finance, setFinance] = useState(true);
   const [hr, setHr] = useState(true);
   const [online, setOnline] = useState(false);
+  const [phone, setPhone] = useState<PhoneAssessment | null>(null);
 
   async function handleSignOut() {
     if (signingOut) return;
@@ -90,6 +94,11 @@ export function OnboardingScreen() {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    if (phone?.error || !phone?.e164) {
+      setBusy(false);
+      setError(phone?.error || "Phone is required.");
+      return;
+    }
     const fd = new FormData(e.currentTarget);
     const err = await onboard({
       businessName: String(fd.get("businessName") ?? ""),
@@ -97,7 +106,7 @@ export function OnboardingScreen() {
         | "cafe"
         | "restaurant"
         | "other",
-      phone: String(fd.get("phone") ?? ""),
+      phone: phone.e164,
       email: String(fd.get("email") ?? ""),
       address: String(fd.get("address") ?? ""),
       city: String(fd.get("city") ?? ""),
@@ -204,11 +213,11 @@ export function OnboardingScreen() {
           className="mt-6 space-y-4 rounded-3xl border border-ink/8 bg-white/90 p-5 shadow-sm sm:p-7"
         >
           <label className="block text-sm">
-            <span className="mb-1 block text-ink/60">Business name</span>
+            <FieldLabel required>Business name</FieldLabel>
             <input name="businessName" required className="field" />
           </label>
           <label className="block text-sm">
-            <span className="mb-1 block text-ink/60">Business type</span>
+            <FieldLabel required>Business type</FieldLabel>
             <select name="orgType" className="field" defaultValue="cafe">
               <option value="cafe">Café</option>
               <option value="restaurant">Restaurant</option>
@@ -217,7 +226,7 @@ export function OnboardingScreen() {
           </label>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">Business email</span>
+              <FieldLabel required>Business email</FieldLabel>
               <input
                 name="email"
                 type="email"
@@ -226,49 +235,47 @@ export function OnboardingScreen() {
                 required
               />
             </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">Phone</span>
-              <input name="phone" className="field" required />
-            </label>
+            <div className="block text-sm">
+              <FieldLabel required>Phone</FieldLabel>
+              <PhoneField required onChange={setPhone} />
+            </div>
           </div>
           <label className="block text-sm">
-            <span className="mb-1 block text-ink/60">Address</span>
+            <FieldLabel>Address</FieldLabel>
             <input name="address" className="field" />
           </label>
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">City</span>
+              <FieldLabel required>City</FieldLabel>
               <input name="city" className="field" required />
             </label>
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">Region</span>
+              <FieldLabel>Region</FieldLabel>
               <input name="region" className="field" />
             </label>
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">Country</span>
-              <input name="country" className="field" defaultValue="Ethiopia" />
+              <FieldLabel required>Country</FieldLabel>
+              <input name="country" className="field" defaultValue="Ethiopia" required />
             </label>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">TIN</span>
-              <input name="tin" className="field" placeholder="Optional" />
+              <FieldLabel>TIN</FieldLabel>
+              <input name="tin" className="field" />
             </label>
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">VAT number</span>
-              <input name="vat" className="field" placeholder="Optional" />
+              <FieldLabel>VAT number</FieldLabel>
+              <input name="vat" className="field" />
             </label>
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">Website</span>
-              <input name="website" className="field" placeholder="Optional" />
+              <FieldLabel>Website</FieldLabel>
+              <input name="website" className="field" placeholder="cafe.example" />
             </label>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">
-                Business license (optional)
-              </span>
+              <FieldLabel>Business license</FieldLabel>
               <input
                 name="license"
                 type="file"
@@ -277,7 +284,7 @@ export function OnboardingScreen() {
               />
             </label>
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">Owner ID (optional)</span>
+              <FieldLabel>Owner ID</FieldLabel>
               <input
                 name="idDoc"
                 type="file"
@@ -293,7 +300,7 @@ export function OnboardingScreen() {
               [
                 ["menu", menu, setMenu, "Menu", "Item catalog & recipes"],
                 ["ordering", ordering, setOrdering, "Ordering", "Cashier POS"],
-                ["kitchen", kitchen, setKitchen, "Kitchen", "Kitchen display"],
+                ["kitchen", kitchen, setKitchen, "Kitchen", "Barista and kitchen displays"],
                 ["inventory", inventory, setInventory, "Inventory", "Stock & costs"],
                 ["finance", finance, setFinance, "Finance", "Reports & day close"],
                 ["hr", hr, setHr, "HR / Staff", "Team seats & permissions"],

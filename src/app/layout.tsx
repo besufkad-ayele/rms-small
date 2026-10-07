@@ -1,7 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
-import { DM_Sans, Fraunces } from "next/font/google";
+import { DM_Sans, Fraunces, Noto_Sans_Ethiopic } from "next/font/google";
 import { AuthProvider } from "@/components/auth/AuthProvider";
+import { LocaleProvider } from "@/components/i18n/LocaleProvider";
 import { OfflineSyncProvider } from "@/components/offline/OfflineSyncProvider";
 import { ServiceWorkerRegistrar } from "@/components/offline/ServiceWorkerRegistrar";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
@@ -15,6 +16,12 @@ const dmSans = DM_Sans({
 const fraunces = Fraunces({
   variable: "--font-fraunces",
   subsets: ["latin"],
+});
+
+const notoEthiopic = Noto_Sans_Ethiopic({
+  variable: "--font-ethiopic",
+  subsets: ["ethiopic"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -54,22 +61,24 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${dmSans.variable} ${fraunces.variable} h-full antialiased`}
+      className={`${dmSans.variable} ${fraunces.variable} ${notoEthiopic.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var k='aramis-theme';var m=localStorage.getItem(k)||'system';var d=m==='dark'||(m!=='light'&&window.matchMedia('(prefers-color-scheme: dark)').matches);var e=document.documentElement;e.classList.toggle('dark',d);e.dataset.theme=d?'dark':'light';e.style.colorScheme=d?'dark':'light';}catch(e){}})();`,
+            __html: `(function(){try{var e=document.documentElement;var k='aramis-theme';var m=localStorage.getItem(k)||'system';var d=m==='dark'||(m!=='light'&&window.matchMedia('(prefers-color-scheme: dark)').matches);e.classList.toggle('dark',d);e.dataset.theme=d?'dark':'light';e.style.colorScheme=d?'dark':'light';var l=localStorage.getItem('aramis-locale');if(l==='am'||l==='en'){e.lang=l;e.dataset.locale=l;}}catch(err){}})();`,
           }}
         />
       </head>
       <body className="min-h-full flex flex-col font-sans">
         <ServiceWorkerRegistrar />
         <ThemeProvider>
-          <AuthProvider>
-            <OfflineSyncProvider>{children}</OfflineSyncProvider>
-          </AuthProvider>
+          <LocaleProvider>
+            <AuthProvider>
+              <OfflineSyncProvider>{children}</OfflineSyncProvider>
+            </AuthProvider>
+          </LocaleProvider>
         </ThemeProvider>
       </body>
     </html>

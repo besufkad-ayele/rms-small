@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Minus, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { useI18n } from "@/components/i18n/LocaleProvider";
 import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import { type CloudMenuItem } from "@/lib/cloud-catalog";
 import {
@@ -36,6 +37,7 @@ export function OrderPOS({
   onClearAppend?: () => void;
 }) {
   const { tenant } = useAuth();
+  const { t } = useI18n();
   const { refreshPendingCount } = useOfflineSync();
   const orgId = tenant!.organization.id;
   const cashierOps = tenant ? canCashierOrderOps(tenant.membership) : false;
@@ -273,7 +275,7 @@ export function OrderPOS({
                 className="rounded-lg bg-white/10 p-1"
                 onClick={() => setQty(line.menuItem.id, line.quantity - 1)}
               >
-                <Minus className="h-3.5 w-3.5" />
+                    <Minus className="h-3.5 w-3.5" aria-hidden />
               </button>
               <span className="w-6 text-center text-sm">{line.quantity}</span>
               <button
@@ -281,7 +283,7 @@ export function OrderPOS({
                 className="rounded-lg bg-white/10 p-1"
                 onClick={() => setQty(line.menuItem.id, line.quantity + 1)}
               >
-                <Plus className="h-3.5 w-3.5" />
+                    <Plus className="h-3.5 w-3.5" aria-hidden />
               </button>
               <button
                 type="button"
@@ -371,6 +373,7 @@ export function OrderPOS({
               key={item.id}
               role="button"
               tabIndex={0}
+              aria-label={t("pos.addItem", { name: item.name })}
               onClick={() => addItem(item)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
@@ -388,7 +391,7 @@ export function OrderPOS({
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={item.image_url}
-                    alt=""
+                    alt={item.name}
                     className="h-full w-full object-cover"
                   />
                 ) : (
@@ -424,23 +427,23 @@ export function OrderPOS({
                 >
                   <button
                     type="button"
-                    aria-label={`Less ${item.name}`}
+                    aria-label={t("pos.less", { name: item.name })}
                     disabled={qty === 0}
                     onClick={() => setQty(item.id, qty - 1)}
                     className="rounded-lg bg-ink/8 p-1.5 text-ink disabled:opacity-30"
                   >
-                    <Minus className="h-3.5 w-3.5" />
+                    <Minus className="h-3.5 w-3.5" aria-hidden />
                   </button>
                   <span className="w-5 text-center text-sm font-semibold tabular-nums">
                     {qty}
                   </span>
                   <button
                     type="button"
-                    aria-label={`More ${item.name}`}
+                    aria-label={t("pos.more", { name: item.name })}
                     onClick={() => addItem(item)}
                     className="rounded-lg bg-teal p-1.5 text-white"
                   >
-                    <Plus className="h-3.5 w-3.5" />
+                    <Plus className="h-3.5 w-3.5" aria-hidden />
                   </button>
                 </div>
               </div>
@@ -490,6 +493,7 @@ function Chip({
   return (
     <button
       type="button"
+      aria-pressed={active}
       onClick={onClick}
       className={cn(
         "rounded-full px-3 py-1.5 text-xs font-medium transition",

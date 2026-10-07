@@ -13,6 +13,7 @@ import type { CloudCacheRow, SyncQueueItem } from "./offline/types";
 
 export class RmsSmallDB extends Dexie {
   business!: EntityTable<BusinessProfile, "id">;
+  /** Legacy local-auth tables. Left in the schema so IndexedDB is not bumped. */
   users!: EntityTable<UserAccount, "id">;
   session!: EntityTable<AuthSession, "id">;
   inventory!: EntityTable<InventoryItem, "id">;

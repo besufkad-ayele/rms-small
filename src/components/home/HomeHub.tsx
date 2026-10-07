@@ -76,7 +76,7 @@ export function HomeHub() {
           {
             href: "/app/kitchen",
             title: "Kitchen",
-            blurb: "Prep tickets & status",
+            blurb: "Barista and kitchen tickets",
             icon: ChefHat,
           },
         ]

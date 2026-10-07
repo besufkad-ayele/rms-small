@@ -19,31 +19,12 @@ import {
 import { useState, type ReactNode } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { AramisLogo } from "@/components/brand/AramisLogo";
+import { useI18n } from "@/components/i18n/LocaleProvider";
 import { InstallAppButton } from "@/components/offline/InstallAppButton";
 import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import { SyncControls, SyncSuccessDialog } from "@/components/offline/SyncUI";
 import { isOwner } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
-
-const PAGE_TITLES: { match: (path: string) => boolean; title: string }[] = [
-  { match: (p) => p === "/app", title: "Home" },
-  { match: (p) => p.startsWith("/app/order"), title: "Order" },
-  { match: (p) => p.startsWith("/app/kitchen"), title: "Kitchen" },
-  { match: (p) => p.startsWith("/app/menu"), title: "Menu" },
-  { match: (p) => p.startsWith("/app/inventory"), title: "Inventory" },
-  { match: (p) => p.startsWith("/app/reports"), title: "Finance" },
-  {
-    match: (p) =>
-      p.startsWith("/app/settings") || p.startsWith("/app/billing"),
-    title: "Settings & Billing",
-  },
-  { match: (p) => p.startsWith("/app/staff"), title: "Staff & HR" },
-];
-
-function titleForPath(pathname: string, override?: string) {
-  if (override) return override;
-  return PAGE_TITLES.find((t) => t.match(pathname))?.title ?? "Dashboard";
-}
 
 export function AppShell({
   children,
@@ -65,6 +46,7 @@ export function AppShell({
     isPlatformAdmin,
   } = useAuth();
   const { connection, pendingCount } = useOfflineSync();
+  const { t } = useI18n();
   const isOffline = connection.status === "down";
   const [open, setOpen] = useState(false);
   const owner = tenant ? isOwner(tenant.membership) : false;
@@ -74,46 +56,60 @@ export function AppShell({
     ? title
     : onSettings
       ? owner
-        ? "Settings & Billing"
-        : "Settings"
-      : titleForPath(pathname);
+        ? t("nav.settingsBilling")
+        : t("nav.settings")
+      : pathname === "/app"
+        ? t("nav.home")
+        : pathname.startsWith("/app/order")
+          ? t("nav.order")
+          : pathname.startsWith("/app/kitchen")
+            ? t("nav.kitchen")
+            : pathname.startsWith("/app/menu")
+              ? t("nav.menu")
+              : pathname.startsWith("/app/inventory")
+                ? t("nav.inventory")
+                : pathname.startsWith("/app/reports")
+                  ? t("nav.finance")
+                  : pathname.startsWith("/app/staff")
+                    ? t("nav.staff")
+                    : t("nav.home");
 
   const nav = [
-    { href: "/app", label: "Home", icon: LayoutGrid, exact: true },
+    { href: "/app", label: t("nav.home"), icon: LayoutGrid, exact: true },
     ...(hasFeature("order")
-      ? [{ href: "/app/order", label: "Order", icon: ShoppingCart }]
+      ? [{ href: "/app/order", label: t("nav.order"), icon: ShoppingCart }]
       : []),
     ...(hasFeature("kitchen")
-      ? [{ href: "/app/kitchen", label: "Kitchen", icon: ChefHat }]
+      ? [{ href: "/app/kitchen", label: t("nav.kitchen"), icon: ChefHat }]
       : []),
     ...(hasFeature("menu")
-      ? [{ href: "/app/menu", label: "Menu", icon: ClipboardList }]
+      ? [{ href: "/app/menu", label: t("nav.menu"), icon: ClipboardList }]
       : []),
     ...(hasFeature("inventory") || hasFeature("inventory_issue")
-      ? [{ href: "/app/inventory", label: "Inventory", icon: Package }]
+      ? [{ href: "/app/inventory", label: t("nav.inventory"), icon: Package }]
       : []),
     ...(hasFeature("finance")
-      ? [{ href: "/app/reports", label: "Finance", icon: BarChart3 }]
+      ? [{ href: "/app/reports", label: t("nav.finance"), icon: BarChart3 }]
       : []),
     {
       href: "/app/settings",
-      label: owner ? "Settings & Billing" : "Settings",
+      label: owner ? t("nav.settingsBilling") : t("nav.settings"),
       icon: Settings,
     },
     ...(hasFeature("staff")
-      ? [{ href: "/app/staff", label: "Staff", icon: Users }]
+      ? [{ href: "/app/staff", label: t("nav.staff"), icon: Users }]
       : []),
     ...(hasModule("online") && tenant?.organization.public_slug
       ? [
           {
             href: `/m/${tenant.organization.public_slug}`,
-            label: "Public menu",
+            label: t("nav.publicMenu"),
             icon: Globe,
           },
         ]
       : []),
     ...(isPlatformAdmin
-      ? [{ href: "/platform", label: "Platform", icon: LayoutGrid }]
+      ? [{ href: "/platform", label: t("nav.platform"), icon: LayoutGrid }]
       : []),
   ];
 
@@ -124,6 +120,12 @@ export function AppShell({
 
   return (
     <div className="min-h-dvh bg-stone text-ink">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-[80] focus:m-3 focus:rounded-lg focus:bg-teal focus:px-3 focus:py-2 focus:text-sm focus:text-white"
+      >
+        {t("nav.skip")}
+      </a>
       <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
         <div className="absolute -left-24 top-0 h-72 w-72 rounded-full bg-teal/15 blur-3xl" />
         <div className="absolute bottom-0 right-0 h-96 w-96 rounded-full bg-gold/20 blur-3xl" />
@@ -131,6 +133,7 @@ export function AppShell({
 
       {/* Fixed sidebar — always brand-dark (same in light & dark theme) */}
       <aside
+        id="app-sidebar"
         className={cn(
           "fixed inset-y-0 left-0 z-40 flex w-64 flex-col transition-transform duration-200",
           "border-r border-white/8 bg-gradient-to-b from-[#0f2a26] via-[#0b1d1a] to-[#071412]",
@@ -148,24 +151,27 @@ export function AppShell({
             <div className="min-w-0 flex-1 space-y-2">
               <AramisLogo tone="onDark" className="h-8 w-auto max-w-full" priority />
               <p className="truncate px-0.5 text-[11px] font-medium tracking-wide text-white/50">
-                {tenant?.organization.name ?? "Your business"}
+                {tenant?.organization.name ?? t("brand.yourBusiness")}
               </p>
             </div>
             <button
               type="button"
               className="shrink-0 rounded-xl border border-white/10 bg-white/5 p-1.5 text-white/70 transition hover:bg-white/10 hover:text-white lg:hidden"
               onClick={() => setOpen(false)}
-              aria-label="Close menu"
+              aria-label={t("nav.closeMenu")}
             >
               <X className="h-4 w-4" />
             </button>
           </div>
 
           <p className="mb-2 px-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/40">
-            Navigate
+            {t("nav.navigate")}
           </p>
 
-          <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto pr-0.5">
+          <nav
+            className="flex flex-1 flex-col gap-0.5 overflow-y-auto pr-0.5"
+            aria-label={t("nav.main")}
+          >
             {nav.map((item) => {
               const active = item.exact
                 ? pathname === item.href
@@ -175,6 +181,7 @@ export function AppShell({
                 <Link
                   key={item.href}
                   href={item.href}
+                  aria-current={active ? "page" : undefined}
                   onClick={() => setOpen(false)}
                   className={cn(
                     "group relative flex items-center gap-3 rounded-xl px-2.5 py-2.5 text-sm font-medium transition-all duration-150",
@@ -208,7 +215,7 @@ export function AppShell({
           <div className="mt-auto space-y-2.5 border-t border-white/8 pt-4">
             <div className="rounded-2xl border border-white/8 bg-white/[0.04] p-3 backdrop-blur-sm">
               <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/40">
-                Connection & sync
+                {t("sync.title")}
               </p>
               <SyncControls tone="dark" />
             </div>
@@ -234,8 +241,8 @@ export function AppShell({
                 type="button"
                 onClick={() => void handleLogout()}
                 className="rounded-xl p-2 text-white/55 transition hover:bg-white/10 hover:text-white"
-                aria-label="Sign out"
-                title="Sign out"
+                aria-label={t("nav.signOut")}
+                title={t("nav.signOut")}
               >
                 <LogOut className="h-4 w-4" />
               </button>
@@ -248,7 +255,7 @@ export function AppShell({
         <button
           type="button"
           className="fixed inset-0 z-30 bg-black/50 lg:hidden"
-          aria-label="Close overlay"
+          aria-label={t("nav.closeOverlay")}
           onClick={() => setOpen(false)}
         />
       ) : null}
@@ -257,14 +264,17 @@ export function AppShell({
         <SyncSuccessDialog />
         {isOffline ? (
           <div className="bg-[#0b1d1a] px-4 py-1.5 text-center text-xs font-medium text-[#eef2f0]">
-            Offline — sales & changes are saved on this device and will sync when
-            the connection is fast enough
-            {pendingCount > 0 ? ` · ${pendingCount} pending` : ""}
+            {t("banner.offline")}
+            {pendingCount > 0
+              ? ` · ${t("sync.pending", { n: pendingCount })}`
+              : ""}
           </div>
         ) : connection.status === "slow" ? (
           <div className="bg-gold px-4 py-1.5 text-center text-xs font-medium text-[#0b1d1a]">
-            Slow connection — working locally; auto-sync waits for a faster link
-            {pendingCount > 0 ? ` · ${pendingCount} pending` : ""}
+            {t("banner.slow")}
+            {pendingCount > 0
+              ? ` · ${t("sync.pending", { n: pendingCount })}`
+              : ""}
           </div>
         ) : null}
 
@@ -278,37 +288,36 @@ export function AppShell({
             )}
           >
             {tenant.subscription.status === "trialing"
-              ? "Trial"
-              : "Subscription"}{" "}
-            ends in {Math.max(0, daysLeft)} day(s)
-            {warningLevel === "urgent" ? " — renew now" : ""}
+              ? t("banner.trial")
+              : t("banner.subscription")}{" "}
+            {t("banner.ends", { n: Math.max(0, daysLeft) })}
+            {warningLevel === "urgent" ? t("banner.renewNow") : ""}
             {owner ? (
               <>
                 {" "}
                 ·{" "}
                 <Link href="/app/settings?tab=billing" className="underline">
-                  Settings & Billing
+                  {t("nav.settingsBilling")}
                 </Link>
               </>
             ) : (
-              " — ask your owner to renew"
+              t("banner.askOwner")
             )}
           </div>
         ) : null}
 
         {accessBlocked ? (
           <div className="bg-coral px-4 py-1.5 text-center text-xs font-medium text-white">
-            Access paused
+            {t("banner.accessPaused")}
             {owner ? (
               <>
-                {" "}
-                — extend in{" "}
+                {t("banner.extendIn")}{" "}
                 <Link href="/app/settings?tab=billing" className="underline">
-                  Settings & Billing
+                  {t("nav.settingsBilling")}
                 </Link>
               </>
             ) : (
-              " — ask your owner to renew"
+              t("banner.askOwner")
             )}
           </div>
         ) : null}
@@ -318,7 +327,9 @@ export function AppShell({
             type="button"
             className="rounded-xl border border-ink/10 bg-paper p-2 lg:hidden"
             onClick={() => setOpen(true)}
-            aria-label="Open menu"
+            aria-label={t("nav.openMenu")}
+            aria-expanded={open}
+            aria-controls="app-sidebar"
           >
             <Menu className="h-5 w-5" />
           </button>
@@ -332,7 +343,11 @@ export function AppShell({
           </div>
         </header>
 
-        <main className="w-full flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="w-full flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-8"
+        >
           {children}
         </main>
       </div>

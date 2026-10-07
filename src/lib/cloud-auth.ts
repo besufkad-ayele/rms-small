@@ -1,5 +1,13 @@
 import type { User } from "@supabase/supabase-js";
 import { db } from "@/lib/db";
+import {
+  optionalEmail,
+  optionalText,
+  optionalWebsite,
+  requireEmail,
+  requireText,
+} from "@/lib/form-sanitize";
+import { optionalPhoneE164, requirePhoneE164 } from "@/lib/phone";
 import { signPaymentProofPath } from "@/lib/sale-payment-proof";
 import { createClient } from "@/lib/supabase/client";
 import type {
@@ -20,14 +28,24 @@ export async function signUp(input: {
   fullName: string;
   phone?: string;
 }) {
+  let email: string;
+  let fullName: string;
+  let phone: string | null;
+  try {
+    email = requireEmail(input.email);
+    fullName = requireText("Full name", input.fullName, 120);
+    phone = input.phone?.trim() ? optionalPhoneE164(input.phone) : null;
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Check the form and try again." };
+  }
   const supabase = createClient();
   const { data, error } = await supabase.auth.signUp({
-    email: input.email.trim(),
+    email,
     password: input.password,
     options: {
       data: {
-        full_name: input.fullName.trim(),
-        phone: input.phone?.trim() || null,
+        full_name: fullName,
+        phone,
       },
     },
   });
@@ -36,7 +54,7 @@ export async function signUp(input: {
   // Ensure session exists (autoconfirm / immediate login)
   if (!data.session) {
     const signed = await supabase.auth.signInWithPassword({
-      email: input.email.trim(),
+      email,
       password: input.password,
     });
     if (signed.error) {
@@ -55,9 +73,9 @@ export async function signUp(input: {
     await supabase
       .from("profiles")
       .update({
-        email: input.email.trim().toLowerCase(),
-        phone: input.phone?.trim() || null,
-        full_name: input.fullName.trim(),
+        email,
+        phone,
+        full_name: fullName,
       })
       .eq("id", user.id);
   }
@@ -331,6 +349,32 @@ export async function onboardOrganization(input: {
   const kitchen = input.kitchenEnabled ?? ordering;
   const hr = input.hrEnabled ?? true;
   const online = input.onlineEnabled ?? false;
+  let businessName: string;
+  let phone: string;
+  let email: string;
+  let address: string;
+  let city: string;
+  let region: string;
+  let country: string;
+  let tin: string;
+  let vat: string;
+  let website: string;
+  try {
+    businessName = requireText("Business name", input.businessName, 120);
+    phone = requirePhoneE164(input.phone || "");
+    email = requireEmail(input.email || "");
+    address = optionalText(input.address || "", 200);
+    city = requireText("City", input.city || "", 80);
+    region = optionalText(input.region || "", 80);
+    country = requireText("Country", input.country || "Ethiopia", 80);
+    tin = optionalText(input.tin || "", 32);
+    vat = optionalText(input.vatNumber || "", 32);
+    website = optionalWebsite(input.website || "");
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : "Check the form and try again.",
+    };
+  }
   if (
     !input.inventoryEnabled &&
     !input.financeEnabled &&
@@ -364,21 +408,21 @@ export async function onboardOrganization(input: {
   }
 
   const { data: orgId, error } = await supabase.rpc("onboard_business", {
-    p_name: input.businessName.trim(),
+    p_name: businessName,
     p_org_type: input.orgType,
-    p_phone: input.phone?.trim() || null,
-    p_email: (input.email || user.email || "").trim().toLowerCase() || null,
-    p_address: input.address?.trim() || null,
-    p_city: input.city?.trim() || null,
-    p_region: input.region?.trim() || null,
-    p_country: input.country?.trim() || "Ethiopia",
+    p_phone: phone,
+    p_email: email || optionalEmail(user.email || "") || null,
+    p_address: address || null,
+    p_city: city,
+    p_region: region || null,
+    p_country: country,
     p_license: licensePath,
     p_id_doc: idPath,
     p_inventory: input.inventoryEnabled,
     p_finance: input.financeEnabled,
-    p_tin: input.tin?.trim() || null,
-    p_vat: input.vatNumber?.trim() || null,
-    p_website: input.website?.trim() || null,
+    p_tin: tin || null,
+    p_vat: vat || null,
+    p_website: website || null,
     p_menu: menu,
     p_ordering: ordering,
     p_hr: hr,

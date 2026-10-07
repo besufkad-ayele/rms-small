@@ -13,7 +13,9 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { BillingPanel } from "@/components/billing/BillingPanel";
+import { useI18n } from "@/components/i18n/LocaleProvider";
 import { useTheme } from "@/components/theme/ThemeProvider";
+import { LOCALES } from "@/lib/i18n";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import {
   updateMyPassword,
@@ -42,6 +44,7 @@ type SettingsTab =
 
 export function SettingsPanel() {
   const { tenant } = useAuth();
+  const { t } = useI18n();
   const owner = tenant ? isOwner(tenant.membership) : false;
   const search = useSearchParams();
 
@@ -51,7 +54,7 @@ export function SettingsPanel() {
       label: string;
       icon: typeof Sun;
     }[] = [
-      { id: "appearance", label: "Appearance", icon: Sun },
+      { id: "appearance", label: t("settings.appearance"), icon: Sun },
       { id: "profile", label: "Profile", icon: UserRound },
     ];
     if (owner) {
@@ -62,7 +65,7 @@ export function SettingsPanel() {
       );
     }
     return list;
-  }, [owner]);
+  }, [owner, t]);
 
   const initial = (search.get("tab") as SettingsTab) || "appearance";
   const [tab, setTab] = useState<SettingsTab>(
@@ -96,6 +99,7 @@ export function SettingsPanel() {
 
 function AppearanceSettings() {
   const { mode, resolved, setMode } = useTheme();
+  const { locale, setLocale, t } = useI18n();
   const options: {
     id: ThemeMode;
     label: string;
@@ -104,60 +108,92 @@ function AppearanceSettings() {
   }[] = [
     {
       id: "light",
-      label: "Light",
-      hint: "Bright surfaces for daytime counters",
+      label: t("settings.light"),
+      hint: t("settings.lightHint"),
       icon: Sun,
     },
     {
       id: "dark",
-      label: "Dark",
-      hint: "Low glare for evening service",
+      label: t("settings.dark"),
+      hint: t("settings.darkHint"),
       icon: Moon,
     },
     {
       id: "system",
-      label: "System",
-      hint: "Follow this device’s theme",
+      label: t("settings.system"),
+      hint: t("settings.systemHint"),
       icon: Monitor,
     },
   ];
 
   return (
-    <section className="rounded-3xl border border-ink/8 bg-paper/90 p-4 sm:p-5">
-      <h3 className="font-display text-xl">Website theme</h3>
-      <p className="mt-1 text-sm text-ink/55">
-        Applies across Aramis on this device. Current:{" "}
-        <span className="font-medium text-ink">{resolved}</span>.
-      </p>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        {options.map((opt) => {
-          const Icon = opt.icon;
-          const active = mode === opt.id;
-          return (
-            <button
-              key={opt.id}
-              type="button"
-              onClick={() => setMode(opt.id)}
-              className={cn(
-                "rounded-2xl border px-4 py-4 text-left transition",
-                active
-                  ? "border-teal bg-teal/10 ring-2 ring-teal/30"
-                  : "border-ink/10 bg-stone/40 hover:border-ink/20",
-              )}
-            >
-              <Icon
+    <div className="space-y-4">
+      <section className="rounded-3xl border border-ink/8 bg-paper/90 p-4 sm:p-5">
+        <h3 className="font-display text-xl">{t("settings.language")}</h3>
+        <p className="mt-1 text-sm text-ink/55">{t("settings.languageHint")}</p>
+        <div
+          className="mt-4 grid gap-3 sm:grid-cols-2"
+          role="radiogroup"
+          aria-label={t("settings.language")}
+        >
+          {LOCALES.map((opt) => {
+            const active = locale === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setLocale(opt.id)}
                 className={cn(
-                  "h-5 w-5",
-                  active ? "text-teal" : "text-ink/50",
+                  "rounded-2xl border px-4 py-4 text-left transition",
+                  active
+                    ? "border-teal bg-teal/10 ring-2 ring-teal/30"
+                    : "border-ink/10 bg-stone/40 hover:border-ink/20",
                 )}
-              />
-              <p className="mt-2 font-semibold">{opt.label}</p>
-              <p className="mt-1 text-xs text-ink/55">{opt.hint}</p>
-            </button>
-          );
-        })}
-      </div>
-    </section>
+              >
+                <p className="font-semibold">{opt.native}</p>
+                <p className="mt-1 text-xs text-ink/55">{opt.label}</p>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+      <section className="rounded-3xl border border-ink/8 bg-paper/90 p-4 sm:p-5">
+        <h3 className="font-display text-xl">{t("settings.theme")}</h3>
+        <p className="mt-1 text-sm text-ink/55">
+          {t("settings.themeHint", { resolved })}
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          {options.map((opt) => {
+            const Icon = opt.icon;
+            const active = mode === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setMode(opt.id)}
+                className={cn(
+                  "rounded-2xl border px-4 py-4 text-left transition",
+                  active
+                    ? "border-teal bg-teal/10 ring-2 ring-teal/30"
+                    : "border-ink/10 bg-stone/40 hover:border-ink/20",
+                )}
+              >
+                <Icon
+                  className={cn(
+                    "h-5 w-5",
+                    active ? "text-teal" : "text-ink/50",
+                  )}
+                />
+                <p className="mt-2 font-semibold">{opt.label}</p>
+                <p className="mt-1 text-xs text-ink/55">{opt.hint}</p>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    </div>
   );
 }
 

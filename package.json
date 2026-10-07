@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:rls": "RLS_LIVE_TEST=1 node --env-file=.env.local ./node_modules/vitest/vitest.mjs run --config vitest.rls.config.ts",
     "seed": "node --env-file=.env.local scripts/seed-demo.mjs"
   },
   "dependencies": {
@@ -16,7 +17,6 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.0",
-    "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "dexie": "^4.2.1",
     "dexie-react-hooks": "^4.2.0",
@@ -29,7 +29,6 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

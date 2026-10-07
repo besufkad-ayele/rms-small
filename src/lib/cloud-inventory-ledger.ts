@@ -1,3 +1,5 @@
+import { optionalText, requireText } from "@/lib/form-sanitize";
+import { optionalPhoneE164 } from "@/lib/phone";
 import { createClient } from "@/lib/supabase/client";
 
 export type CloudInventorySupplier = {
@@ -61,10 +63,10 @@ export async function upsertSupplier(
   const supabase = createClient();
   const payload = {
     organization_id: orgId,
-    name: input.name.trim(),
-    phone: input.phone?.trim() || null,
-    location: input.location?.trim() || null,
-    notes: input.notes?.trim() || "",
+    name: requireText("Supplier name", input.name, 120),
+    phone: optionalPhoneE164(input.phone || "") || null,
+    location: optionalText(input.location || "", 160) || null,
+    notes: optionalText(input.notes || "", 500),
     updated_at: new Date().toISOString(),
   };
   if (input.id) {

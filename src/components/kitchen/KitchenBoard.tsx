@@ -12,6 +12,7 @@ import {
 import {
   DndContext,
   DragOverlay,
+  KeyboardSensor,
   PointerSensor,
   TouchSensor,
   closestCenter,
@@ -23,16 +24,16 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { Check, ChefHat, Clock, GripVertical } from "lucide-react";
+import { Check, ChefHat, Clock, Coffee, GripVertical } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import {
+  deriveOrderStatus,
   lineKitchenStatus,
   lineRound,
   listCloudOrders,
   listKitchenOrders,
   orderLines,
-  updateKitchenRound,
-  updateOrderStatus,
+  updateKitchenLines,
   type CloudSaleLine,
   type CloudSaleOrder,
   type KitchenLineStatus,
@@ -41,11 +42,20 @@ import {
   SALE_ORDER_STATUS_LABELS,
 } from "@/lib/tenant";
 import { parseMenuDescription } from "@/lib/menu-details";
+import {
+  prepKindForItem,
+  stationForKind,
+  type PrepStation,
+} from "@/lib/prep-station";
 import { loadMenuResilient } from "@/lib/offline/resilient";
 import { subscribeOrgOrderChanges } from "@/lib/realtime-orders";
 import { cn, dayKey, formatMoney } from "@/lib/utils";
 
-type MenuKitchenInfo = { note: string; prepMinutes: number | null };
+type MenuKitchenInfo = {
+  note: string;
+  prepMinutes: number | null;
+  station: PrepStation;
+};
 
 const MenuKitchenContext = createContext<Map<string, MenuKitchenInfo>>(
   new Map(),
@@ -75,52 +85,68 @@ type KitchenTicket = {
   key: string;
   order: CloudSaleOrder;
   round: number;
+  station: PrepStation;
   status: KitchenColumnStatus;
   lines: CloudSaleLine[];
   sentAt: string;
   addon: boolean;
 };
 
-function ticketsFor(order: CloudSaleOrder): KitchenTicket[] {
-  const lines = orderLines(order);
-  const tracked = lines.some(
-    (line) => line.kitchen_status || Number(line.round) > 1,
-  );
-  if (!tracked) {
-    if (
-      order.status !== "placed" &&
-      order.status !== "preparing" &&
-      order.status !== "ready"
-    ) {
-      return [];
-    }
-    return [
-      {
-        key: order.id,
-        order,
-        round: 1,
-        status: order.status,
-        lines,
-        sentAt: order.created_at,
-        addon: false,
-      },
-    ];
+function stationForLine(
+  line: CloudSaleLine,
+  menu: Map<string, MenuKitchenInfo>,
+): PrepStation {
+  if (line.menu_item_id) {
+    const info = menu.get(line.menu_item_id);
+    if (info) return info.station;
   }
-  const byRound = new Map<number, CloudSaleLine[]>();
+  return "kitchen";
+}
+
+function columnStatus(
+  group: CloudSaleLine[],
+  fallback: CloudSaleOrder["status"],
+): KitchenColumnStatus | null {
+  const statuses = group.map((line) => lineKitchenStatus(line, fallback));
+  if (statuses.every((status) => status === "served")) return null;
+  if (statuses.some((status) => status === "placed")) return "placed";
+  if (statuses.some((status) => status === "preparing")) return "preparing";
+  return "ready";
+}
+
+function ticketsFor(
+  order: CloudSaleOrder,
+  menu: Map<string, MenuKitchenInfo>,
+): KitchenTicket[] {
+  const lines = orderLines(order);
+  if (
+    lines.length === 0 &&
+    order.status !== "placed" &&
+    order.status !== "preparing" &&
+    order.status !== "ready"
+  ) {
+    return [];
+  }
+  const groups = new Map<string, CloudSaleLine[]>();
   for (const line of lines) {
     const round = lineRound(line);
-    byRound.set(round, [...(byRound.get(round) || []), line]);
+    const station = stationForLine(line, menu);
+    const key = `${round}::${station}`;
+    groups.set(key, [...(groups.get(key) || []), line]);
   }
-  return [...byRound.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .flatMap(([round, group]) => {
-      const status = lineKitchenStatus(group[0], order.status);
-      if (status === "served") return [];
+  return [...groups.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .flatMap(([key, group]) => {
+      const [roundRaw, station] = key.split("::") as [string, PrepStation];
+      const status = columnStatus(group, order.status);
+      if (!status) return [];
+      const round = Number(roundRaw);
       return [
         {
-          key: `${order.id}::${round}`,
+          key: `${order.id}::${round}::${station}`,
           order,
           round,
+          station,
           status,
           lines: group,
           sentAt: group.find((line) => line.sent_at)?.sent_at || order.created_at,
@@ -145,19 +171,12 @@ export function KitchenBoard() {
   const [servedToday, setServedToday] = useState<CloudSaleOrder[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [activeId, setActiveId] = useState<string | null>(null);
   const [lastServed, setLastServed] = useState<{
     receipt: string;
+    station: string;
     total: number;
     items: number;
   } | null>(null);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: 180, tolerance: 8 },
-    }),
-  );
 
   const reload = useCallback(async () => {
     try {
@@ -199,17 +218,30 @@ export function KitchenBoard() {
     () => new Map(),
   );
   useEffect(() => {
-    const apply = (menu: { id: string; description: string }[]) => {
+    const apply = (
+      menu: {
+        id: string;
+        description: string;
+        tags?: string[] | null;
+        category?: string | null;
+      }[],
+    ) => {
       const next = new Map<string, MenuKitchenInfo>();
       for (const item of menu) {
         const d = parseMenuDescription(item.description);
-        if (d.kitchenNote || d.prepMinutes) {
-          next.set(item.id, { note: d.kitchenNote, prepMinutes: d.prepMinutes });
-        }
+        next.set(item.id, {
+          note: d.kitchenNote,
+          prepMinutes: d.prepMinutes,
+          station: stationForKind(
+            prepKindForItem({ tags: item.tags, category: item.category }),
+          ),
+        });
       }
       setMenuInfo(next);
     };
-    void loadMenuResilient(orgId, apply).then(apply).catch(() => undefined);
+    void loadMenuResilient(orgId, apply)
+      .then(apply)
+      .catch(() => undefined);
   }, [orgId]);
 
   useEffect(() => {
@@ -234,31 +266,22 @@ export function KitchenBoard() {
     };
   }, [servedToday]);
 
-  const tickets = useMemo(() => orders.flatMap(ticketsFor), [orders]);
-
-  const activeTicket = useMemo(
-    () => tickets.find((ticket) => ticket.key === activeId) ?? null,
-    [tickets, activeId],
+  const tickets = useMemo(
+    () => orders.flatMap((order) => ticketsFor(order, menuInfo)),
+    [orders, menuInfo],
   );
-
-  const queueStats = useMemo(() => {
-    const placed = tickets.filter((ticket) => ticket.status === "placed");
-    const oldest = placed.reduce(
-      (min, ticket) => Math.max(min, waitMinutes(ticket.sentAt)),
-      0,
-    );
-    return {
-      placed: placed.length,
-      preparing: tickets.filter((ticket) => ticket.status === "preparing").length,
-      ready: tickets.filter((ticket) => ticket.status === "ready").length,
-      addons: tickets.filter((ticket) => ticket.addon).length,
-      oldest,
-    };
-  }, [tickets]);
 
   async function moveTo(ticketKey: string, status: AdvanceStatus) {
     const ticket = tickets.find((item) => item.key === ticketKey);
     if (!ticket || ticket.status === status) return;
+
+    const lineIds = ticket.lines
+      .map((line) => line.id)
+      .filter((id): id is string => Boolean(id));
+    if (lineIds.length !== ticket.lines.length) {
+      setError("Refresh the board, then try that ticket again.");
+      return;
+    }
 
     setBusyId(ticketKey);
     const kitchenStatus: KitchenLineStatus =
@@ -266,41 +289,26 @@ export function KitchenBoard() {
     setOrders((prev) =>
       prev.map((order): CloudSaleOrder => {
         if (order.id !== ticket.order.id) return order;
+        const idSet = new Set(lineIds);
         const lines: CloudSaleLine[] = orderLines(order).map((line) =>
-          lineRound(line) === ticket.round
+          line.id && idSet.has(line.id)
             ? { ...line, kitchen_status: kitchenStatus }
             : line,
-        );
-        const everyServed = lines.every(
-          (line) => line.kitchen_status === "served",
         );
         return {
           ...order,
           sale_order_lines: lines,
           lines,
-          status: ticket.key.includes("::")
-            ? everyServed
-              ? "completed"
-              : order.status
-            : status === "completed"
-              ? "completed"
-              : status,
+          status: deriveOrderStatus(lines, order.status),
         };
       }),
     );
     try {
-      if (ticketKey.includes("::")) {
-        await updateKitchenRound(orgId, ticket.order.id, ticket.round, kitchenStatus);
-      } else {
-        await updateOrderStatus(
-          orgId,
-          ticket.order.id,
-          status === "completed" ? "completed" : status,
-        );
-      }
+      await updateKitchenLines(orgId, ticket.order.id, lineIds, kitchenStatus);
       if (status === "completed") {
         setLastServed({
           receipt: ticket.order.receipt_number,
+          station: ticket.station === "barista" ? "barista" : "kitchen",
           total: Number(ticket.order.total) || 0,
           items: itemCount(ticket.lines),
         });
@@ -314,36 +322,17 @@ export function KitchenBoard() {
     }
   }
 
-  function onDragStart(event: DragStartEvent) {
-    setActiveId(String(event.active.id));
-  }
-
-  function onDragEnd(event: DragEndEvent) {
-    setActiveId(null);
-    const ticketKey = String(event.active.id);
-    const overId = event.over ? String(event.over.id) : null;
-    if (!overId) return;
-
-    let target: AdvanceStatus | null = null;
-    if (COLUMN_IDS.has(overId)) {
-      target = overId as KitchenColumnStatus;
-    } else {
-      const overTicket = tickets.find((ticket) => ticket.key === overId);
-      if (overTicket && COLUMN_IDS.has(overTicket.status)) {
-        target = overTicket.status;
-      }
-    }
-    if (!target) return;
-    void moveTo(ticketKey, target);
-  }
+  const baristaTickets = tickets.filter((ticket) => ticket.station === "barista");
+  const kitchenTickets = tickets.filter((ticket) => ticket.station === "kitchen");
 
   return (
     <MenuKitchenContext.Provider value={menuInfo}>
-    <div className="space-y-4">
+    <div className="space-y-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-ink/60">
-          Each send is its own ticket. Adding food to a table keeps one bill,
-          and the new dishes show up here as a fresh send.
+          Drinks show on the barista board. Food shows on the kitchen board.
+          Anyone with the kitchen role updates both. A new send on an open
+          table stays on the same bill.
         </p>
         <button
           type="button"
@@ -354,47 +343,18 @@ export function KitchenBoard() {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <div className="rounded-2xl border border-gold/30 bg-gold/15 px-3 py-2.5">
-          <p className="text-[11px] text-ink/60">New sends</p>
-          <p className="mt-0.5 font-display text-xl">{queueStats.placed}</p>
-          <p className="text-[11px] text-ink/45">
-            {queueStats.oldest > 0
-              ? `Oldest waiting ${queueStats.oldest} min`
-              : "Nothing waiting"}
-          </p>
-        </div>
-        <div className="rounded-2xl border border-ink/8 bg-white/90 px-3 py-2.5">
-          <p className="text-[11px] text-ink/50">Cooking</p>
-          <p className="mt-0.5 font-display text-xl">{queueStats.preparing}</p>
-          <p className="text-[11px] text-ink/45">
-            {queueStats.addons} add-on{queueStats.addons === 1 ? "" : "s"}
-          </p>
-        </div>
-        <div className="rounded-2xl border border-teal/25 bg-teal/5 px-3 py-2.5">
-          <p className="text-[11px] text-teal/80">Ready to serve</p>
-          <p className="mt-0.5 font-display text-xl text-teal">
-            {queueStats.ready}
-          </p>
-          <p className="text-[11px] text-ink/45">
-            {servedStats.count} tickets out today
-          </p>
-        </div>
-        <div className="rounded-2xl border border-ink/8 bg-white/90 px-3 py-2.5">
-          <p className="text-[11px] text-ink/50">Served today</p>
-          <p className="mt-0.5 font-display text-xl">
-            {servedStats.items} items
-          </p>
-          <p className="text-[11px] text-ink/45">
-            {formatMoney(servedStats.total)}
-          </p>
-        </div>
-      </div>
+      <p className="text-sm text-ink/55">
+        Served today: {servedStats.items} items · {formatMoney(servedStats.total)}
+      </p>
 
       {lastServed ? (
-        <p className="rounded-2xl border border-teal/30 bg-teal/10 px-3 py-2 text-sm text-ink">
-          Served {lastServed.receipt}: {lastServed.items} item(s) ·{" "}
-          {formatMoney(lastServed.total)} left the kitchen
+        <p
+          role="status"
+          aria-live="polite"
+          className="rounded-2xl border border-teal/30 bg-teal/10 px-3 py-2 text-sm text-ink"
+        >
+          Served {lastServed.receipt} from the {lastServed.station}:{" "}
+          {lastServed.items} item(s) · {formatMoney(lastServed.total)}
         </p>
       ) : null}
 
@@ -404,30 +364,103 @@ export function KitchenBoard() {
         </p>
       ) : null}
 
+      <StationBoard
+        station="barista"
+        title="Barista"
+        blurb="Tea, coffee, and other drinks."
+        tickets={baristaTickets}
+        busyId={busyId}
+        onMove={(key, status) => void moveTo(key, status)}
+      />
+      <StationBoard
+        station="kitchen"
+        title="Kitchen"
+        blurb="Plates and other food."
+        tickets={kitchenTickets}
+        busyId={busyId}
+        onMove={(key, status) => void moveTo(key, status)}
+      />
+    </div>
+    </MenuKitchenContext.Provider>
+  );
+}
+
+function StationBoard({
+  station,
+  title,
+  blurb,
+  tickets,
+  busyId,
+  onMove,
+}: {
+  station: PrepStation;
+  title: string;
+  blurb: string;
+  tickets: KitchenTicket[];
+  busyId: string | null;
+  onMove: (ticketKey: string, status: AdvanceStatus) => void;
+}) {
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 180, tolerance: 8 },
+    }),
+    useSensor(KeyboardSensor),
+  );
+  const activeTicket = tickets.find((ticket) => ticket.key === activeId) ?? null;
+  const Icon = station === "barista" ? Coffee : ChefHat;
+
+  function onDragEnd(event: DragEndEvent) {
+    setActiveId(null);
+    const ticketKey = String(event.active.id);
+    const overId = event.over ? String(event.over.id) : null;
+    if (!overId) return;
+    const prefix = `${station}:`;
+    let target: AdvanceStatus | null = null;
+    if (overId.startsWith(prefix) && COLUMN_IDS.has(overId.slice(prefix.length))) {
+      target = overId.slice(prefix.length) as KitchenColumnStatus;
+    } else {
+      const overTicket = tickets.find((ticket) => ticket.key === overId);
+      if (overTicket) target = overTicket.status;
+    }
+    if (!target) return;
+    onMove(ticketKey, target);
+  }
+
+  return (
+    <section className="space-y-3" aria-label={title}>
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 font-display text-2xl">
+            <Icon className="h-5 w-5 text-teal" />
+            {title}
+          </h2>
+          <p className="text-sm text-ink/55">{blurb}</p>
+        </div>
+        <p className="text-xs text-ink/45">{tickets.length} open</p>
+      </div>
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
-        onDragStart={onDragStart}
+        onDragStart={(event: DragStartEvent) => setActiveId(String(event.active.id))}
         onDragEnd={onDragEnd}
         onDragCancel={() => setActiveId(null)}
       >
         <div className="grid gap-3 lg:grid-cols-3">
-          {COLUMNS.map((col) => {
-            const list = tickets.filter((ticket) => ticket.status === col.status);
-            return (
-              <KitchenColumn
-                key={col.status}
-                status={col.status}
-                next={col.next}
-                tickets={list}
-                busyId={busyId}
-                activeId={activeId}
-                onAdvance={(ticket) => void moveTo(ticket.key, col.next)}
-              />
-            );
-          })}
+          {COLUMNS.map((col) => (
+            <KitchenColumn
+              key={col.status}
+              station={station}
+              status={col.status}
+              next={col.next}
+              tickets={tickets.filter((ticket) => ticket.status === col.status)}
+              busyId={busyId}
+              activeId={activeId}
+              onAdvance={(ticket) => onMove(ticket.key, col.next)}
+            />
+          ))}
         </div>
-
         <DragOverlay dropAnimation={null}>
           {activeTicket ? (
             <div className="rotate-1 scale-[1.02] opacity-95 shadow-lg">
@@ -436,12 +469,12 @@ export function KitchenBoard() {
           ) : null}
         </DragOverlay>
       </DndContext>
-    </div>
-    </MenuKitchenContext.Provider>
+    </section>
   );
 }
 
 function KitchenColumn({
+  station,
   status,
   next,
   tickets,
@@ -449,6 +482,7 @@ function KitchenColumn({
   activeId,
   onAdvance,
 }: {
+  station: PrepStation;
   status: KitchenColumnStatus;
   next: AdvanceStatus;
   tickets: KitchenTicket[];
@@ -456,11 +490,12 @@ function KitchenColumn({
   activeId: string | null;
   onAdvance: (ticket: KitchenTicket) => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status });
+  const { setNodeRef, isOver } = useDroppable({ id: `${station}:${status}` });
 
   return (
     <section
       ref={setNodeRef}
+      aria-label={SALE_ORDER_STATUS_LABELS[status]}
       className={cn(
         "rounded-3xl border bg-white/80 p-3 transition sm:p-4",
         isOver
@@ -545,6 +580,7 @@ function DraggableOrderCard({
         <button
           type="button"
           disabled={busy}
+          aria-label={`${nextLabel(next)} ${ticket.order.receipt_number}`}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();

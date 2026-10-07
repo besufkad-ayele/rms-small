@@ -44,6 +44,15 @@ body {
   font-family: var(--font-dm-sans), system-ui, sans-serif;
 }
 
+html[lang="am"],
+html[lang="am"] body {
+  font-family: var(--font-ethiopic), var(--font-dm-sans), system-ui, sans-serif;
+}
+
+html[lang="am"] .font-display {
+  font-family: var(--font-ethiopic), var(--font-fraunces), serif;
+}
+
 .safe-pb {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }

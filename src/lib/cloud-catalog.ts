@@ -1,4 +1,7 @@
 import { createClient } from "@/lib/supabase/client";
+import { optionalText, requireNumber, requireText } from "@/lib/form-sanitize";
+import { assertPrepTag, prepKindForItem } from "@/lib/prep-station";
+import { normalizeTags } from "@/lib/menu-tags";
 import type { MenuCategory } from "@/lib/tenant";
 
 export interface CloudInventoryItem {
@@ -188,12 +191,16 @@ export async function upsertInventory(
   const supabase = createClient();
   const payload = {
     organization_id: orgId,
-    name: input.name.trim(),
-    unit: input.unit.trim(),
+    name: requireText("Name", input.name, 120),
+    unit: requireText("Unit", input.unit, 32),
     unit_id: input.unit_id || null,
-    stock_qty: input.stock_qty,
-    low_stock_threshold: input.low_stock_threshold,
-    cost_per_unit: input.cost_per_unit,
+    stock_qty: requireNumber("Stock quantity", Number(input.stock_qty), { min: 0 }),
+    low_stock_threshold: requireNumber(
+      "Low-stock alert",
+      Number(input.low_stock_threshold),
+      { min: 0 },
+    ),
+    cost_per_unit: requireNumber("Cost", Number(input.cost_per_unit), { min: 0 }),
     updated_at: new Date().toISOString(),
   };
   if (input.id) {
@@ -270,14 +277,15 @@ export async function upsertMenu(
   },
 ) {
   const supabase = createClient();
-  const tags = (input.tags || []).map((t) => t.trim().toLowerCase()).filter(Boolean);
+  const tags = normalizeTags(input.tags);
+  assertPrepTag(tags);
   let menuId = input.id;
   const base = {
-    name: input.name.trim(),
+    name: requireText("Name", input.name, 80),
     category: input.category,
-    price: input.price,
+    price: requireNumber("Price", Number(input.price), { min: 0 }),
     available: input.available,
-    description: input.description.trim(),
+    description: optionalText(input.description || "", 800),
     tags,
     updated_at: new Date().toISOString(),
   };
@@ -514,6 +522,15 @@ export async function seedOrgCatalog(orgId: string) {
     ])
     .select("*");
   if (menuErr) throw new Error(menuErr.message);
+
+  for (const item of menu || []) {
+    const kind = prepKindForItem(item);
+    await supabase
+      .from("menu_items")
+      .update({ tags: [kind] })
+      .eq("id", item.id);
+    item.tags = [kind];
+  }
 
   const espresso = (menu || []).find((m) => m.name === "Espresso");
   const macchiato = (menu || []).find((m) => m.name === "Macchiato");
