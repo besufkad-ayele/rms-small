@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Minus, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
@@ -65,8 +65,25 @@ export function OrderPOS({
     void reload().catch((e) =>
       setError(e instanceof Error ? e.message : "Failed to load menu"),
     );
-    void reloadOpen();
-  }, [reload, reloadOpen]);
+  }, [reload]);
+
+  const openInFlight = useRef(false);
+  useEffect(() => {
+    let stopped = false;
+    const tick = () => {
+      if (stopped || openInFlight.current) return;
+      openInFlight.current = true;
+      void reloadOpen().finally(() => {
+        openInFlight.current = false;
+      });
+    };
+    tick();
+    const t = window.setInterval(tick, 1_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(t);
+    };
+  }, [reloadOpen]);
 
   useEffect(() => {
     setCart([]);

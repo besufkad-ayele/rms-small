@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -175,10 +176,22 @@ export function KitchenBoard() {
     }
   }, [orgId]);
 
+  const reloadInFlight = useRef(false);
   useEffect(() => {
-    void reload();
-    const t = window.setInterval(() => void reload(), 12_000);
-    return () => window.clearInterval(t);
+    let stopped = false;
+    const tick = () => {
+      if (stopped || reloadInFlight.current) return;
+      reloadInFlight.current = true;
+      void reload().finally(() => {
+        reloadInFlight.current = false;
+      });
+    };
+    tick();
+    const t = window.setInterval(tick, 1_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(t);
+    };
   }, [reload]);
 
   const [menuInfo, setMenuInfo] = useState<Map<string, MenuKitchenInfo>>(

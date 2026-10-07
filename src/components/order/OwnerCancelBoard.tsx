@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ban } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { loadMenuResilient } from "@/lib/offline/resilient";
@@ -27,16 +27,12 @@ export function OwnerCancelBoard() {
 
   const reload = useCallback(async () => {
     try {
-      const [o, m] = await Promise.all([
-        listCloudOrders(orgId, {
-          dayKey: dayKey(new Date()),
-          statuses: ["placed", "preparing", "ready", "completed"],
-          limit: 100,
-        }),
-        loadMenuResilient(orgId),
-      ]);
+      const o = await listCloudOrders(orgId, {
+        dayKey: dayKey(new Date()),
+        statuses: ["placed", "preparing", "ready", "completed"],
+        limit: 100,
+      });
       setOrders(o.filter((x) => x.status !== "canceled"));
-      setMenu(m);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load orders");
@@ -44,7 +40,27 @@ export function OwnerCancelBoard() {
   }, [orgId]);
 
   useEffect(() => {
-    void reload();
+    void loadMenuResilient(orgId)
+      .then(setMenu)
+      .catch(() => undefined);
+  }, [orgId]);
+
+  const reloadInFlight = useRef(false);
+  useEffect(() => {
+    let stopped = false;
+    const tick = () => {
+      if (stopped || reloadInFlight.current) return;
+      reloadInFlight.current = true;
+      void reload().finally(() => {
+        reloadInFlight.current = false;
+      });
+    };
+    tick();
+    const t = window.setInterval(tick, 1_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(t);
+    };
   }, [reload]);
 
   const sorted = useMemo(

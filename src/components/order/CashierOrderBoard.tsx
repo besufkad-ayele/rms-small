@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Ban,
   Banknote,
@@ -113,10 +113,22 @@ export function CashierOrderBoard({
     }
   }, [orgId, filter, owner, waiterView]);
 
+  const reloadInFlight = useRef(false);
   useEffect(() => {
-    void reload();
-    const t = window.setInterval(() => void reload(), 10_000);
-    return () => window.clearInterval(t);
+    let stopped = false;
+    const tick = () => {
+      if (stopped || reloadInFlight.current) return;
+      reloadInFlight.current = true;
+      void reload().finally(() => {
+        reloadInFlight.current = false;
+      });
+    };
+    tick();
+    const t = window.setInterval(tick, 1_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(t);
+    };
   }, [reload]);
 
   useEffect(() => {
