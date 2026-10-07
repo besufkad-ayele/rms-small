@@ -60,20 +60,20 @@ const en = {
   "auth.staffSubtitle":
     "Use the email and password your restaurant owner created for you.",
   "auth.approvedSubtitle":
-    "Your account was approved. Sign in with the password you chose when you signed up.",
+    "Your account was approved. Sign in with the email and password Aramis sent you.",
   "auth.defaultSubtitle":
-    "Owners and staff sign in here with the email and password from signup (or staff invite).",
+    "Owners sign in with the credentials Aramis issued after approval. Staff use the email and password from their invite.",
   "auth.approvedBanner":
-    "Access granted — sign in with the password you created at signup.",
+    "Access granted — sign in with the password Aramis sent you.",
   "auth.staffBanner":
     "You’ll only see the restaurant and features your owner enabled for you.",
   "auth.ownerPrompt": "Business owner?",
   "auth.ownerSignIn": "Owner sign in",
   "auth.staffPrompt": "Team member?",
   "auth.newHere": "New here?",
-  "auth.createAccount": "Create account",
+  "auth.createAccount": "Request access",
   "auth.signupSubtitle":
-    "Choose your email and password now — these are your login credentials. After you onboard, Aramis reviews your business, then you sign in with the same password.",
+    "Tell us about your business and choose a package. Aramis reviews your interest, then sends login credentials — you do not set a password.",
   "auth.fullName": "Full name",
   "auth.phone": "Phone",
   "auth.confirmPassword": "Confirm password",

@@ -1,4 +1,8 @@
-import type { PaymentProofRow, PlatformTenantRow } from "@/app/platform/actions";
+import type {
+  ApplicationRow,
+  PaymentProofRow,
+  PlatformTenantRow,
+} from "@/app/platform/actions";
 
 const PREFS_KEY = "aramis-owner-alerts";
 
@@ -33,10 +37,17 @@ export function saveAlertPrefs(prefs: AlertPrefs) {
   window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
 }
 
-export function pendingKycIds(tenants: PlatformTenantRow[]) {
-  return tenants
+export function pendingKycIds(
+  tenants: PlatformTenantRow[],
+  applications: ApplicationRow[] = [],
+) {
+  const orgIds = tenants
     .filter((t) => t.organization.verification_status === "pending")
     .map((t) => String(t.organization.id));
+  const appIds = applications
+    .filter((a) => String(a.status || "pending") === "pending")
+    .map((a) => `app:${String(a.id)}`);
+  return [...appIds, ...orgIds];
 }
 
 export function pendingProofIds(proofs: PaymentProofRow[]) {
@@ -122,9 +133,10 @@ export type OwnerAlert = {
 export function diffOwnerAlerts(input: {
   proofs: PaymentProofRow[];
   tenants: PlatformTenantRow[];
+  applications?: ApplicationRow[];
   prefs: AlertPrefs;
 }): { prefs: AlertPrefs; alerts: OwnerAlert[] } {
-  const kyc = pendingKycIds(input.tenants);
+  const kyc = pendingKycIds(input.tenants, input.applications || []);
   const proofs = pendingProofIds(input.proofs);
   const follow = dueFollowUpIds(input.tenants);
   const first =
@@ -153,8 +165,8 @@ export function diffOwnerAlerts(input: {
         title: "New restaurant to review",
         body:
           newKyc.length === 1
-            ? "A new KYC application is pending."
-            : `${newKyc.length} new KYC applications are pending.`,
+            ? "A new interest application is pending."
+            : `${newKyc.length} new interest applications are pending.`,
         tag: "owner-kyc",
         section: "onboarding",
       });

@@ -103,8 +103,8 @@ export default function HomePage() {
             <AramisLogo priority className="h-14 sm:h-16" />
           </div>
           <p className="mx-auto mt-5 max-w-sm text-sm text-stone/70">
-            Café & restaurant counter. Sign in if you already have access, or
-            create an account to get started.
+            Café & restaurant counter. Sign in if you already have credentials,
+            or request access to get started.
           </p>
         </div>
 
@@ -125,7 +125,7 @@ export default function HomePage() {
             href="/signup"
             className="rounded-xl border border-white/20 bg-white/5 px-6 py-3.5 text-center text-sm font-semibold text-stone backdrop-blur sm:col-span-2"
           >
-            Create account
+            Request access
           </Link>
         </div>
       </div>

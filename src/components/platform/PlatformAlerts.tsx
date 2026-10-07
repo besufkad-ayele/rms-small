@@ -2,7 +2,11 @@
 
 import { Bell, BellOff, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PaymentProofRow, PlatformTenantRow } from "@/app/platform/actions";
+import type {
+  ApplicationRow,
+  PaymentProofRow,
+  PlatformTenantRow,
+} from "@/app/platform/actions";
 import type { PlatformSection } from "./platform-ui";
 import {
   diffOwnerAlerts,
@@ -16,11 +20,13 @@ import {
 export function usePlatformAlerts({
   proofs,
   tenants,
+  applications = [],
   ready,
   onOpen,
 }: {
   proofs: PaymentProofRow[];
   tenants: PlatformTenantRow[];
+  applications?: ApplicationRow[];
   ready: boolean;
   onOpen: (section: PlatformSection) => void;
 }) {
@@ -36,7 +42,12 @@ export function usePlatformAlerts({
   useEffect(() => {
     if (!ready) return;
     const current = prefsRef.current;
-    const next = diffOwnerAlerts({ proofs, tenants, prefs: current });
+    const next = diffOwnerAlerts({
+      proofs,
+      tenants,
+      applications,
+      prefs: current,
+    });
     if (!primed.current) {
       primed.current = true;
       setPrefs(next.prefs);
@@ -70,7 +81,7 @@ export function usePlatformAlerts({
         url: `/platform?tab=${alert.section}`,
       });
     }
-  }, [proofs, tenants, ready]);
+  }, [proofs, tenants, applications, ready]);
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {

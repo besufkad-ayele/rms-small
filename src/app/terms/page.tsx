@@ -37,11 +37,11 @@ export default function TermsPage() {
 
       <PolicySection id="trial" title="Trial and subscription">
         <p>
-          A new restaurant starts with a 14-day trial of the modules chosen at
-          onboarding. When the trial or a paid period ends, the counter pauses
-          until the owner submits payment proof and Aramis approves it. Staff
-          then see a paused screen and must wait for the owner. Renewal is handled
-          in Settings & Billing.
+          A new restaurant starts with a trial whose length and package Aramis
+          sets when approving the interest application. When the trial or a paid
+          period ends, the counter pauses until the owner uploads payment proof
+          and Aramis approves it. Staff then see a paused screen and must wait
+          for the owner. Renewal is handled in Settings & Billing.
         </p>
       </PolicySection>
 

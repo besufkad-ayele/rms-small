@@ -23,15 +23,17 @@ export function assertMenuImageSize(file: File): void {
 
 /**
  * Shrink and convert to WebP, lowering size and quality until it fits
- * MENU_IMAGE_MAX_BYTES. Returns null when the browser cannot decode the file.
+ * `maxBytes` (default MENU_IMAGE_MAX_BYTES). Returns null when the browser
+ * cannot decode the file.
  */
 export async function fileToWebpBlob(
   file: File,
   maxEdge = 960,
   quality = 0.82,
+  maxBytes = MENU_IMAGE_MAX_BYTES,
 ): Promise<Blob | null> {
   assertMenuImageSize(file);
-  if (file.type === "image/webp" && file.size <= MENU_IMAGE_MAX_BYTES) {
+  if (file.type === "image/webp" && file.size <= maxBytes) {
     return file;
   }
   let bitmap: ImageBitmap;
@@ -43,7 +45,8 @@ export async function fileToWebpBlob(
   try {
     let edge = maxEdge;
     let q = quality;
-    for (let attempt = 0; attempt < 6; attempt++) {
+    let last: Blob | null = null;
+    for (let attempt = 0; attempt < 8; attempt++) {
       const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
       const w = Math.max(1, Math.round(bitmap.width * scale));
       const h = Math.max(1, Math.round(bitmap.height * scale));
@@ -56,13 +59,15 @@ export async function fileToWebpBlob(
       const blob = await new Promise<Blob | null>((resolve) =>
         canvas.toBlob((b) => resolve(b), "image/webp", q),
       );
-      if (!blob) return null;
-      if (blob.size <= MENU_IMAGE_MAX_BYTES) return blob;
-      edge = Math.round(edge * 0.8);
-      q = Math.max(0.5, q - 0.08);
+      if (!blob) return last;
+      last = blob;
+      if (blob.size <= maxBytes) return blob;
+      edge = Math.round(edge * 0.75);
+      q = Math.max(0.42, q - 0.1);
     }
+    if (last && last.size <= maxBytes * 1.15) return last;
     throw new Error(
-      `Photo is still over ${formatBytes(MENU_IMAGE_MAX_BYTES)} after compressing. Try a simpler photo.`,
+      `Photo is still over ${formatBytes(maxBytes)} after compressing. Try a simpler photo.`,
     );
   } finally {
     bitmap.close();

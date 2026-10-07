@@ -41,7 +41,7 @@ export default function NotFound() {
       </p>
       <p>Useful places:</p>
       <ul className="list-disc space-y-1 pl-5">
-        <li>Home, to sign in or create an account</li>
+        <li>Home, to sign in or request access</li>
         <li>Staff sign in, if an owner already made you a login</li>
         <li>FAQ, for trial, offline, and privacy questions</li>
       </ul>

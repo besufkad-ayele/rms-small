@@ -122,7 +122,7 @@ export default function PendingPage() {
         </h1>
         <p className="mt-2 text-center text-sm text-ink/60">
           Your business is under review. When Aramis approves, sign in with the
-          email and password you created — your 14-day trial starts then.
+          credentials they send you — your trial starts then.
         </p>
 
         {details ? (

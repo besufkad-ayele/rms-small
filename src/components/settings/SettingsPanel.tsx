@@ -18,7 +18,6 @@ import { useTheme } from "@/components/theme/ThemeProvider";
 import { LOCALES } from "@/lib/i18n";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import {
-  updateMyPassword,
   updateMyProfile,
   updateOrganizationProfile,
 } from "@/lib/cloud-auth";
@@ -84,7 +83,7 @@ export function SettingsPanel() {
       <p className="text-sm text-ink/60">
         {owner
           ? "Theme, profile, payment methods, business details, and subscription."
-          : "Your profile and password — ask your owner for payment or billing changes."}
+          : "Your profile — ask your owner for password, payment, or billing changes."}
       </p>
 
       <SegmentedTabs tabs={tabs} value={tab} onChange={setTab} />
@@ -203,8 +202,6 @@ function ProfileSettings() {
   const profile = tenant!.profile;
   const [fullName, setFullName] = useState(profile.full_name || "");
   const [phone, setPhone] = useState(profile.phone || "");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -227,27 +224,6 @@ function ProfileSettings() {
     }
     await refresh();
     setMessage("Profile saved.");
-  }
-
-  async function onSavePassword(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    setMessage(null);
-    if (password !== confirm) {
-      setBusy(false);
-      setError("Passwords do not match.");
-      return;
-    }
-    const res = await updateMyPassword({ password });
-    setBusy(false);
-    if ("error" in res && res.error) {
-      setError(res.error);
-      return;
-    }
-    setPassword("");
-    setConfirm("");
-    setMessage("Password updated.");
   }
 
   return (
@@ -281,47 +257,6 @@ function ProfileSettings() {
             className="rounded-xl bg-teal px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
           >
             Save profile
-          </button>
-        </form>
-      </section>
-
-      <section className="rounded-3xl border border-ink/8 bg-paper/90 p-4 sm:p-5">
-        <h3 className="font-display text-xl">Change password</h3>
-        <p className="mt-1 text-sm text-ink/55">
-          You can update your own login password here anytime.
-        </p>
-        <form
-          className="mt-4 space-y-3"
-          onSubmit={(e) => void onSavePassword(e)}
-        >
-          <label className="block text-sm">
-            <span className="mb-1 block text-ink/60">New password</span>
-            <input
-              type="password"
-              className="field"
-              required
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-ink/60">Confirm password</span>
-            <input
-              type="password"
-              className="field"
-              required
-              minLength={8}
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={busy}
-            className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-stone disabled:opacity-50"
-          >
-            Update password
           </button>
         </form>
       </section>

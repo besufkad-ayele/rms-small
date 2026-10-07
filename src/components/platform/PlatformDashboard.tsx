@@ -2,16 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  approveApplicationAction,
   approveOrganizationAction,
   approvePaymentProofAction,
   getKycSignedUrlAction,
   getPlatformOverviewAction,
   getTenantUsageAction,
+  listApplicationsAction,
   listPaymentProofsAction,
   listPlatformTenantsAction,
   listPricingCatalogAction,
+  rejectApplicationAction,
   rejectOrganizationAction,
   rejectPaymentProofAction,
+  type ApplicationRow,
   type PaymentProofRow,
   type PlatformOverviewStats,
   type PlatformTenantRow,
@@ -67,8 +71,8 @@ const NAV: Array<{
   { id: "packages", label: "Packages & pricing", short: "Prices", icon: Tags },
   {
     id: "onboarding",
-    label: "Onboarding / KYC",
-    short: "KYC",
+    label: "Interest / access",
+    short: "Access",
     badge: "kyc",
     icon: ClipboardCheck,
   },
@@ -118,12 +122,14 @@ function DashboardInner({
   );
   const [section, setSection] = useState<PlatformSection>("overview");
   const [tenants, setTenants] = useState<PlatformTenantRow[]>([]);
+  const [applications, setApplications] = useState<ApplicationRow[]>([]);
   const [proofs, setProofs] = useState<PaymentProofRow[]>([]);
   const [packages, setPackages] = useState<PackageRow[]>([]);
   const [modulePrices, setModulePrices] = useState<ModulePriceRow[]>([]);
   const [addons, setAddons] = useState<AddonRow[]>([]);
   const [stats, setStats] = useState<PlatformOverviewStats | null>(null);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const [packageById, setPackageById] = useState<Record<string, string>>({});
 
   const [filter, setFilter] = useState<
     "pending" | "approved" | "rejected" | "all"
@@ -164,12 +170,15 @@ function DashboardInner({
   const [proofMonths, setProofMonths] = useState<Record<string, number>>({});
   const [proofPkg, setProofPkg] = useState<Record<string, string>>({});
 
-  const pendingKyc = useMemo(
-    () =>
-      tenants.filter((t) => t.organization.verification_status === "pending")
-        .length,
-    [tenants],
-  );
+  const pendingKyc = useMemo(() => {
+    const appPending = applications.filter(
+      (a) => String(a.status || "pending") === "pending",
+    ).length;
+    const orgPending = tenants.filter(
+      (t) => t.organization.verification_status === "pending",
+    ).length;
+    return appPending + orgPending;
+  }, [applications, tenants]);
   const pendingPayments = useMemo(
     () => proofs.filter((p) => p.status === "pending").length,
     [proofs],
@@ -182,10 +191,51 @@ function DashboardInner({
       return;
     }
     setTenants(t.tenants);
-    const nextApprove: Record<string, ModuleState> = {};
-    for (const row of t.tenants) {
-      nextApprove[String(row.organization.id)] = flagsFromSub(row.subscription);
+    setApproveMods((prev) => {
+      const next = { ...prev };
+      for (const row of t.tenants) {
+        const id = String(row.organization.id);
+        if (!next[id]) next[id] = flagsFromSub(row.subscription);
+      }
+      return next;
+    });
+  }, [reportLoad]);
+
+  const loadApplications = useCallback(async () => {
+    const a = await listApplicationsAction();
+    if ("error" in a) {
+      reportLoad("applications", a.error);
+      return;
     }
+    setApplications(a.applications);
+    setApproveMods((prev) => {
+      const next = { ...prev };
+      for (const app of a.applications) {
+        const id = String(app.id);
+        if (!next[id]) {
+          next[id] = {
+            menu: Boolean(app.menu_wanted ?? true),
+            ordering: Boolean(app.ordering_wanted ?? true),
+            kitchen: Boolean(app.kitchen_wanted ?? true),
+            inventory: Boolean(app.inventory_wanted ?? true),
+            finance: Boolean(app.finance_wanted ?? true),
+            hr: Boolean(app.hr_wanted ?? true),
+            online: Boolean(app.online_wanted ?? false),
+          };
+        }
+      }
+      return next;
+    });
+    setPackageById((prev) => {
+      const next = { ...prev };
+      for (const app of a.applications) {
+        const id = String(app.id);
+        if (!next[id] && app.package_code) {
+          next[id] = String(app.package_code);
+        }
+      }
+      return next;
+    });
   }, [reportLoad]);
 
   const loadProofs = useCallback(async () => {
@@ -245,12 +295,20 @@ function DashboardInner({
     void loadUsage();
     await Promise.all([
       loadTenants(),
+      loadApplications(),
       loadProofs(),
       loadCatalog(),
       loadOverview(),
     ]);
     setLoading(false);
-  }, [loadCatalog, loadOverview, loadProofs, loadTenants, loadUsage]);
+  }, [
+    loadApplications,
+    loadCatalog,
+    loadOverview,
+    loadProofs,
+    loadTenants,
+    loadUsage,
+  ]);
 
   useEffect(() => {
     void reloadAll();
@@ -265,10 +323,15 @@ function DashboardInner({
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      void Promise.all([loadOverview(), loadProofs(), loadTenants()]);
+      void Promise.all([
+        loadOverview(),
+        loadProofs(),
+        loadTenants(),
+        loadApplications(),
+      ]);
     }, 45_000);
     return () => window.clearInterval(id);
-  }, [loadOverview, loadProofs, loadTenants]);
+  }, [loadApplications, loadOverview, loadProofs, loadTenants]);
 
   const go = useCallback((sectionId: PlatformSection) => {
     setSection(sectionId);
@@ -285,7 +348,12 @@ function DashboardInner({
   const alerts = usePlatformAlerts({
     proofs,
     tenants,
-    ready: !loading || tenants.length > 0 || proofs.length > 0,
+    applications,
+    ready:
+      !loading ||
+      tenants.length > 0 ||
+      proofs.length > 0 ||
+      applications.length > 0,
     onOpen: go,
   });
 
@@ -335,11 +403,12 @@ function DashboardInner({
     throwIfError(res, "Approve failed");
     if ("email" in res && res.email && res.password) {
       setLastCreds({ email: res.email, password: res.password });
+      setShowLastCreds(true);
     }
     toast.success(
       `Approved ${row.organization.name}. They sign in at /login.`,
     );
-    await Promise.all([loadTenants(), loadOverview()]);
+    await Promise.all([loadTenants(), loadOverview(), loadApplications()]);
   }
 
   async function rejectOrg(row: PlatformTenantRow) {
@@ -351,6 +420,61 @@ function DashboardInner({
     throwIfError(res, "Reject failed");
     toast.success(`Rejected ${row.organization.name}`);
     await Promise.all([loadTenants(), loadOverview()]);
+  }
+
+  async function approveApplication(app: ApplicationRow) {
+    const id = String(app.id);
+    const mods = approveMods[id] ?? {
+      menu: Boolean(app.menu_wanted ?? true),
+      ordering: Boolean(app.ordering_wanted ?? true),
+      kitchen: Boolean(app.kitchen_wanted ?? true),
+      inventory: Boolean(app.inventory_wanted ?? true),
+      finance: Boolean(app.finance_wanted ?? true),
+      hr: Boolean(app.hr_wanted ?? true),
+      online: Boolean(app.online_wanted ?? false),
+    };
+    setLastCreds(null);
+    setShowLastCreds(false);
+    const res = await approveApplicationAction({
+      applicationId: id,
+      packageCode: packageById[id] || String(app.package_code || "") || undefined,
+      trialDays: trialDaysByOrg[id] ?? 14,
+      trialMonths: trialMonthsByOrg[id] || undefined,
+      trialEndsAt: fromDatetimeLocalValue(trialEndsByOrg[id] || ""),
+      menuEnabled: mods.menu,
+      orderingEnabled: mods.ordering,
+      kitchenEnabled: mods.kitchen,
+      inventoryEnabled: mods.inventory,
+      financeEnabled: mods.finance,
+      hrEnabled: mods.hr,
+      onlineEnabled: mods.online,
+      followUpAt: fromDatetimeLocalValue(followUpByOrg[id] || ""),
+      followUpNote: followUpNoteByOrg[id] || undefined,
+    });
+    throwIfError(res, "Approve failed");
+    if ("email" in res && res.email && res.password) {
+      setLastCreds({ email: res.email, password: res.password });
+      setShowLastCreds(true);
+    }
+    toast.success(
+      `Approved ${app.company_name || app.email}. Copy credentials below and send them.`,
+    );
+    await Promise.all([
+      loadApplications(),
+      loadTenants(),
+      loadOverview(),
+    ]);
+  }
+
+  async function rejectApplication(app: ApplicationRow) {
+    const notes = window.prompt("Rejection note (optional)") || undefined;
+    const res = await rejectApplicationAction({
+      applicationId: String(app.id),
+      adminNotes: notes,
+    });
+    throwIfError(res, "Reject failed");
+    toast.success(`Rejected ${app.company_name || app.email}`);
+    await Promise.all([loadApplications(), loadOverview()]);
   }
 
   async function approveProof(proof: PaymentProofRow) {
@@ -705,17 +829,25 @@ function DashboardInner({
             />
           ) : null}
 
-          {section === "onboarding" && loading && tenants.length === 0 ? (
+          {section === "onboarding" &&
+          loading &&
+          tenants.length === 0 &&
+          applications.length === 0 ? (
             <SectionShimmer variant="list" />
           ) : null}
 
-          {section === "onboarding" && !(loading && tenants.length === 0) ? (
+          {section === "onboarding" &&
+          !(loading && tenants.length === 0 && applications.length === 0) ? (
             <OnboardingSection
+              applications={applications}
               rows={filteredOnboarding}
+              packages={packages}
               filter={filter}
               setFilter={setFilter}
               approveMods={approveMods}
               setApproveMods={setApproveMods}
+              packageById={packageById}
+              setPackageById={setPackageById}
               trialDaysByOrg={trialDaysByOrg}
               setTrialDaysByOrg={setTrialDaysByOrg}
               trialMonthsByOrg={trialMonthsByOrg}
@@ -727,6 +859,8 @@ function DashboardInner({
               followUpNoteByOrg={followUpNoteByOrg}
               setFollowUpNoteByOrg={setFollowUpNoteByOrg}
               busy={busy}
+              onApproveApplication={(a) => approveApplication(a)}
+              onRejectApplication={(a) => rejectApplication(a)}
               onApprove={(r) => approveOrg(r)}
               onReject={(r) => rejectOrg(r)}
               onOpenDoc={openDoc}

@@ -148,7 +148,25 @@ export function HomeHub() {
                 ? ` · ${Math.max(0, daysLeft)} day(s) left`
                 : ""}
             </p>
-            {warningLevel !== "none" ? (
+            {warningLevel !== "none" && owner ? (
+              <div className="mt-3">
+                <p
+                  className={cn(
+                    "text-sm font-medium",
+                    warningLevel === "urgent" ? "text-coral" : "text-gold",
+                  )}
+                >
+                  {tenant.subscription.status === "trialing" ? "Trial" : "Plan"}{" "}
+                  ends soon — pay offline, then upload your payment proof.
+                </p>
+                <Link
+                  href="/app/settings?tab=billing"
+                  className="mt-2 inline-flex rounded-xl bg-gold px-4 py-2 text-sm font-semibold text-ink"
+                >
+                  Open Billing
+                </Link>
+              </div>
+            ) : warningLevel !== "none" ? (
               <p
                 className={cn(
                   "mt-2 text-sm font-medium",
@@ -156,7 +174,7 @@ export function HomeHub() {
                 )}
               >
                 {tenant.subscription.status === "trialing" ? "Trial" : "Plan"}{" "}
-                ends soon — renew in Settings & Billing.
+                ends soon — ask the owner to renew in Settings & Billing.
               </p>
             ) : null}
           </div>

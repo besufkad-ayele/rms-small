@@ -60,20 +60,20 @@ export const en = {
   "auth.staffSubtitle":
     "Use the email and password your restaurant owner created for you.",
   "auth.approvedSubtitle":
-    "Your account was approved. Sign in with the password you chose when you signed up.",
+    "Your account was approved. Sign in with the email and password Aramis sent you.",
   "auth.defaultSubtitle":
-    "Owners and staff sign in here with the email and password from signup (or staff invite).",
+    "Owners sign in with the credentials Aramis issued after approval. Staff use the email and password from their invite.",
   "auth.approvedBanner":
-    "Access granted — sign in with the password you created at signup.",
+    "Access granted — sign in with the password Aramis sent you.",
   "auth.staffBanner":
     "You’ll only see the restaurant and features your owner enabled for you.",
   "auth.ownerPrompt": "Business owner?",
   "auth.ownerSignIn": "Owner sign in",
   "auth.staffPrompt": "Team member?",
   "auth.newHere": "New here?",
-  "auth.createAccount": "Create account",
+  "auth.createAccount": "Request access",
   "auth.signupSubtitle":
-    "Choose your email and password now — these are your login credentials. After you onboard, Aramis reviews your business, then you sign in with the same password.",
+    "Tell us about your business and choose a package. Aramis reviews your interest, then sends login credentials — you do not set a password.",
   "auth.fullName": "Full name",
   "auth.phone": "Phone",
   "auth.confirmPassword": "Confirm password",
@@ -142,16 +142,11 @@ export const en = {
   "settings.ownerIntro":
     "Theme, profile, payment methods, business details, and subscription.",
   "settings.staffIntro":
-    "Your profile and password — ask your owner for payment or billing changes.",
+    "Your profile — ask your owner for password, payment, or billing changes.",
   "settings.yourProfile": "Your profile",
   "settings.signedInAs": "Signed in as {email}",
   "settings.saveProfile": "Save profile",
-  "settings.changePassword": "Change password",
-  "settings.passwordHint": "You can update your own login password here anytime.",
-  "settings.newPassword": "New password",
-  "settings.updatePassword": "Update password",
   "settings.profileSaved": "Profile saved.",
-  "settings.passwordUpdated": "Password updated.",
   "settings.paymentMethods": "Payment methods",
   "settings.paymentHint":
     "Cashiers pick from these when marking an order paid.",
@@ -168,7 +163,8 @@ export const en = {
   "pos.less": "Less {name}",
   "pos.more": "More {name}",
   "home.daysLeft": "{n} day(s) left",
-  "home.trialEndsSoon": "Trial ends soon — renew in Settings & Billing.",
+  "home.trialEndsSoon":
+    "Trial ends soon — pay offline, then upload your payment proof in Settings & Billing.",
   "home.planEndsSoon": "Plan ends soon — renew in Settings & Billing.",
   "home.todaySales": "Today's sales",
   "home.ordersToday": "Orders today",
@@ -693,7 +689,7 @@ export const en = {
   "pending.approved": "Approved — opening Aramis…",
   "pending.waiting": "Waiting for access",
   "pending.body":
-    "Your business is under review. When Aramis approves, sign in with the email and password you created — your 14-day trial starts then.",
+    "Your business is under review. When Aramis approves, you will receive login credentials and your trial will start.",
   "pending.refresh": "Refresh status",
   "pending.name": "Name",
   "pending.email": "Email",

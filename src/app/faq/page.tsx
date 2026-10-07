@@ -14,23 +14,25 @@ const GROUPS: FaqGroup[] = [
     items: [
       {
         q: "What is Aramis Product?",
-        a: "It is the counter for a small café or restaurant: orders, kitchen, menu, inventory, staff, and finance. Owners pick modules when they onboard. Guests can order from a public menu link if that module is on.",
+        a: "It is the counter for a small café or restaurant: orders, kitchen, menu, inventory, staff, and finance. Owners request access with a package; Aramis enables the matching modules. Guests can order from a public menu link if that module is on.",
       },
       {
         q: "How do I sign in?",
-        a: "Owners and staff use the email and password from signup or from the staff invite. Open Sign in on the home page. If you were just approved, use the same password you chose when you created the account.",
+        a: "Owners use the email and password Aramis sends after approving your interest application. Staff use the email and password from their invite. Open Sign in on the home page.",
         href: "/login",
         hrefLabel: "Go to sign in",
       },
       {
         q: "What is staff sign in?",
-        a: "It is the same login, with wording for teammates. Use the email and password the owner created for you. Owners who are setting up the business should use the main sign in, then create the restaurant.",
+        a: "It is the same login, with wording for teammates. Use the email and password the owner created for you.",
         href: "/staff-login",
         hrefLabel: "Staff sign in",
       },
       {
-        q: "Why am I waiting after signup?",
-        a: "After you describe the business and choose modules, Aramis reviews the account. The pending page stays up until that review finishes. You can leave it open; it checks again on its own.",
+        q: "How do I request access?",
+        a: "Open Request access, fill in your business details, logo, and package — no password. Aramis reviews the application, starts your trial, and sends login credentials.",
+        href: "/signup",
+        hrefLabel: "Request access",
       },
     ],
   },
@@ -39,11 +41,11 @@ const GROUPS: FaqGroup[] = [
     items: [
       {
         q: "How long is the trial?",
-        a: "New restaurants get 14 days on the modules chosen at onboarding. The app shows how many days are left. Near the end it warns the owner to renew.",
+        a: "Aramis sets the trial length when approving your application. The app shows how many days are left. Near the end it warns the owner to renew.",
       },
       {
         q: "What happens when access is paused?",
-        a: "The owner is sent to Settings & Billing to upload payment proof. Staff cannot open the other areas until the owner renews and the proof is approved. Ask the owner if you are stuck on a paused screen.",
+        a: "The owner is sent to Settings & Billing to upload a Telebirr / CBE / bank payment proof image. Staff cannot open the other areas until the owner renews and the proof is approved.",
       },
       {
         q: "Which payment methods can a sale use?",

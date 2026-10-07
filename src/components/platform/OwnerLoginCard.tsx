@@ -79,9 +79,9 @@ export function OwnerLoginCard({
             </p>
           ) : (
             <p className="mt-0.5 text-xs text-ink/55">
-              Hidden — the owner still uses the password they chose at
-              signup. Generate or set one below if they need a new password.
-              It is shown once and is not stored.
+              Hidden — owners use the password Aramis issued (they cannot
+              change it in the app). Generate or set one below if they need a
+              new password. It is shown once and is not stored.
             </p>
           )}
           <div className="mt-2 flex flex-wrap gap-2">

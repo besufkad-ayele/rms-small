@@ -435,7 +435,7 @@ export async function resetStaffPasswordAction(input: {
   if (row.role === "owner") {
     return {
       error:
-        "Owners change their own password in Settings → Profile (not from Staff).",
+        "Owner passwords are managed by Aramis on the platform — not from Staff.",
     };
   }
 

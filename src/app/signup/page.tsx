@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { SignupScreen } from "@/components/auth/SignupScreen";
+import { InterestForm } from "@/components/apply/InterestForm";
 import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { isOwner } from "@/lib/permissions";
@@ -41,9 +41,7 @@ export default function SignupPage() {
     }
     if (accessBlocked) {
       router.replace(
-        isOwner(tenant.membership)
-          ? "/app/settings?tab=billing"
-          : "/app",
+        isOwner(tenant.membership) ? "/app/settings?tab=billing" : "/app",
       );
       return;
     }
@@ -86,5 +84,5 @@ export default function SignupPage() {
     return <AuthLoadingScreen message="Opening Aramis…" />;
   }
 
-  return <SignupScreen />;
+  return <InterestForm />;
 }

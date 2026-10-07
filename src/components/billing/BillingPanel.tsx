@@ -387,9 +387,10 @@ export function BillingPanel() {
       <section className="rounded-3xl border border-ink/8 bg-white/90 p-4 sm:p-6">
         <h2 className="font-display text-xl">Extend subscription</h2>
         <p className="mt-1 text-sm text-ink/55">
-          Pick a package or modules, choose months, pay the calculated amount,
-          then upload Telebirr / CBE / bank proof. Access stays as-is until
-          Aramis verifies.
+          1) Pick a package or modules and months. 2) Pay that amount via
+          Telebirr, CBE, or bank. 3) Upload the payment screenshot or video
+          here. Access stays as-is until Aramis verifies the proof — there is
+          no card checkout in the app.
         </p>
         {catalogError ? (
           <p className="mt-2 text-sm text-coral">{catalogError}</p>

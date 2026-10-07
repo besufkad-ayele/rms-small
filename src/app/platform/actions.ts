@@ -523,16 +523,26 @@ export async function rejectOrganizationAction(input: {
   return { ok: true as const };
 }
 
-/** @deprecated Prefer approveOrganizationAction — signup users set their own password */
+/**
+ * Approve a passwordless interest application: create auth user + org +
+ * subscription (trialing), issue a one-time password for the admin to send.
+ */
 export async function approveApplicationAction(input: {
   applicationId: string;
+  packageCode?: string;
   menuEnabled?: boolean;
   orderingEnabled?: boolean;
   kitchenEnabled?: boolean;
   inventoryEnabled?: boolean;
   financeEnabled?: boolean;
   hrEnabled?: boolean;
+  onlineEnabled?: boolean;
   trialDays?: number;
+  trialMonths?: number;
+  trialEndsAt?: string | null;
+  followUpAt?: string | null;
+  followUpNote?: string | null;
+  extraStaffSeats?: number;
   adminNotes?: string;
 }) {
   const gate = await requirePlatformAdmin();
@@ -544,13 +554,83 @@ export async function approveApplicationAction(input: {
     .select("*")
     .eq("id", input.applicationId)
     .single();
-  if (appErr || !app) return { error: appErr?.message || "Application not found" };
+  if (appErr || !app) {
+    return { error: appErr?.message || "Application not found" };
+  }
   if (app.status === "approved") {
     return { error: "Already approved", email: app.email as string };
   }
+  if (app.status === "rejected") {
+    return { error: "This application was rejected." };
+  }
 
-  // If they already signed up with this email, approve their org instead
   const email = String(app.email).toLowerCase();
+  const fullName = String(app.full_name || "").trim() || email.split("@")[0];
+  const phone = String(app.phone || "").trim() || null;
+  const businessName =
+    String(app.company_name || "").trim() || `${fullName}'s business`;
+
+  const endRes = resolveAccessEnd({
+    endsAt: input.trialEndsAt,
+    addDays:
+      input.trialMonths && input.trialMonths > 0
+        ? 0
+        : (input.trialDays ?? TRIAL_DAYS),
+    addMonths:
+      input.trialMonths && input.trialMonths > 0 ? input.trialMonths : 0,
+  });
+  if ("error" in endRes) return { error: endRes.error };
+  const trialEnds = endRes.end;
+
+  const fu = followUpPatch({
+    followUpAt: input.followUpAt,
+    followUpNote: input.followUpNote,
+  });
+  if ("error" in fu) return { error: fu.error };
+
+  const packageCode =
+    input.packageCode?.trim() ||
+    (app.package_code as string | null) ||
+    null;
+
+  let flags = resolveModuleFlags(
+    {
+      menuEnabled: input.menuEnabled ?? Boolean(app.menu_wanted),
+      orderingEnabled: input.orderingEnabled ?? Boolean(app.ordering_wanted),
+      kitchenEnabled: input.kitchenEnabled ?? Boolean(app.kitchen_wanted),
+      inventoryEnabled:
+        input.inventoryEnabled ?? Boolean(app.inventory_wanted),
+      financeEnabled: input.financeEnabled ?? Boolean(app.finance_wanted),
+      hrEnabled: input.hrEnabled ?? Boolean(app.hr_wanted),
+      onlineEnabled: input.onlineEnabled ?? Boolean(app.online_wanted),
+    },
+    null,
+  );
+  let planCode = packageCode || "starter";
+  if (packageCode) {
+    const { data: pkg } = await admin
+      .from("subscription_packages")
+      .select("*")
+      .eq("code", packageCode)
+      .maybeSingle();
+    if (pkg) {
+      // Admin module toggles win when explicitly provided; else package.
+      const anyExplicit =
+        input.menuEnabled !== undefined ||
+        input.orderingEnabled !== undefined ||
+        input.kitchenEnabled !== undefined ||
+        input.inventoryEnabled !== undefined ||
+        input.financeEnabled !== undefined ||
+        input.hrEnabled !== undefined ||
+        input.onlineEnabled !== undefined;
+      if (!anyExplicit) {
+        flags = packageDbFlags(pkg as PackageRow);
+      }
+      planCode = pkg.code;
+    }
+  }
+  const seats = seatPatch(flags, input.extraStaffSeats ?? 0);
+
   const { data: listed } = await admin.auth.admin.listUsers({ perPage: 1000 });
   const existing = listed.users.find((u) => u.email?.toLowerCase() === email);
 
@@ -563,40 +643,216 @@ export async function approveApplicationAction(input: {
       .maybeSingle();
 
     if (membership?.organization_id) {
+      const password = generatePassword();
+      const { error: pwErr } = await admin.auth.admin.updateUserById(
+        existing.id,
+        { password, email_confirm: true },
+      );
+      if (pwErr) return { error: pwErr.message };
+
       const res = await approveOrganizationAction({
         organizationId: membership.organization_id,
         trialDays: input.trialDays,
-        menuEnabled: input.menuEnabled,
-        orderingEnabled: input.orderingEnabled,
-        inventoryEnabled: input.inventoryEnabled,
-        financeEnabled: input.financeEnabled,
-        hrEnabled: input.hrEnabled,
+        trialMonths: input.trialMonths,
+        trialEndsAt: input.trialEndsAt,
+        packageCode: packageCode || undefined,
+        menuEnabled: flags.menu_enabled,
+        orderingEnabled: flags.ordering_enabled,
+        kitchenEnabled: flags.kitchen_enabled,
+        inventoryEnabled: flags.inventory_enabled,
+        financeEnabled: flags.finance_enabled,
+        hrEnabled: flags.hr_enabled,
+        onlineEnabled: flags.online_enabled,
+        extraStaffSeats: input.extraStaffSeats,
+        followUpAt: input.followUpAt,
+        followUpNote: input.followUpNote,
         adminNotes: input.adminNotes,
       });
       if ("error" in res) return res;
+
       await admin
         .from("applications")
         .update({
           status: "approved",
           organization_id: membership.organization_id,
+          generated_password: null,
           reviewed_by: user.id,
           reviewed_at: new Date().toISOString(),
-          admin_notes: input.adminNotes || "Linked to existing account",
+          admin_notes:
+            input.adminNotes || "Approved — linked existing account",
           updated_at: new Date().toISOString(),
         })
         .eq("id", app.id);
+
       return {
         ok: true as const,
         email,
+        password,
         organizationId: membership.organization_id,
         trialEndsAt: res.trialEndsAt,
+        packageCode: planCode,
       };
     }
   }
 
+  const password = generatePassword();
+  let userId = existing?.id as string | undefined;
+
+  if (!userId) {
+    const { data: created, error: createErr } =
+      await admin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          full_name: fullName,
+          phone,
+        },
+      });
+    if (createErr || !created.user) {
+      return { error: createErr?.message || "Could not create login." };
+    }
+    userId = created.user.id;
+  } else {
+    const { error: pwErr } = await admin.auth.admin.updateUserById(userId, {
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: fullName, phone },
+    });
+    if (pwErr) return { error: pwErr.message };
+  }
+
+  await admin.from("profiles").upsert({
+    id: userId,
+    full_name: fullName,
+    phone,
+    email,
+    updated_at: new Date().toISOString(),
+  });
+
+  const orgType =
+    app.org_type === "restaurant" || app.org_type === "other"
+      ? app.org_type
+      : "cafe";
+
+  const { data: org, error: orgErr } = await admin
+    .from("organizations")
+    .insert({
+      name: businessName,
+      org_type: orgType,
+      phone,
+      email,
+      address: (app.address as string) || null,
+      city: (app.city as string) || null,
+      region: (app.region as string) || null,
+      country: (app.country as string) || "Ethiopia",
+      tin: (app.tin as string) || null,
+      vat_number: (app.vat_number as string) || null,
+      website: (app.website as string) || null,
+      business_license_url: (app.business_license_url as string) || null,
+      id_document_url: (app.id_document_url as string) || null,
+      verification_status: "approved",
+      verified_at: new Date().toISOString(),
+      verified_by: user.id,
+      admin_notes: input.adminNotes || "Approved from interest application",
+      created_by: userId,
+    })
+    .select("id")
+    .single();
+
+  if (orgErr || !org) {
+    if (!existing) await admin.auth.admin.deleteUser(userId);
+    return { error: orgErr?.message || "Could not create organization." };
+  }
+
+  const orgId = org.id as string;
+
+  // Copy application logo into org-logos/{orgId}/logo.webp when present
+  let logoUrl: string | null = null;
+  const appLogoPath = `applications/${app.id}/logo.webp`;
+  const { data: logoBlob, error: logoDlErr } = await admin.storage
+    .from("org-logos")
+    .download(appLogoPath);
+  if (!logoDlErr && logoBlob) {
+    const buf = Buffer.from(await logoBlob.arrayBuffer());
+    const dest = `${orgId}/logo.webp`;
+    const { error: logoUpErr } = await admin.storage
+      .from("org-logos")
+      .upload(dest, buf, { contentType: "image/webp", upsert: true });
+    if (!logoUpErr) {
+      const { data: pub } = admin.storage.from("org-logos").getPublicUrl(dest);
+      logoUrl = `${pub.publicUrl}?v=${Date.now()}`;
+    }
+  } else if (app.logo_url) {
+    logoUrl = String(app.logo_url);
+  }
+  if (logoUrl) {
+    await admin
+      .from("organizations")
+      .update({ logo_url: logoUrl, updated_at: new Date().toISOString() })
+      .eq("id", orgId);
+  }
+
+  const { error: memErr } = await admin.from("memberships").insert({
+    organization_id: orgId,
+    user_id: userId,
+    role: "owner",
+    active: true,
+  });
+  if (memErr) {
+    await admin.from("organizations").delete().eq("id", orgId);
+    if (!existing) await admin.auth.admin.deleteUser(userId);
+    return { error: memErr.message };
+  }
+
+  const { error: subErr } = await admin.from("subscriptions").insert({
+    organization_id: orgId,
+    status: "trialing",
+    ...flags,
+    trial_ends_at: trialEnds.toISOString(),
+    plan_code: planCode,
+    package_code: packageCode || planCode,
+    ...seats,
+    ...fu,
+    notes:
+      input.adminNotes ||
+      `Trial from interest · ends ${trialEnds.toISOString().slice(0, 10)}`,
+  });
+  if (subErr) {
+    await admin.from("memberships").delete().eq("organization_id", orgId);
+    await admin.from("organizations").delete().eq("id", orgId);
+    if (!existing) await admin.auth.admin.deleteUser(userId);
+    return { error: subErr.message };
+  }
+
+  await admin.from("org_meta").upsert({
+    organization_id: orgId,
+    receipt_seq: 0,
+    seeded: false,
+  });
+
+  await ensureOnlineSlug(admin, orgId, Boolean(flags.online_enabled));
+
+  await admin
+    .from("applications")
+    .update({
+      status: "approved",
+      organization_id: orgId,
+      generated_password: null,
+      reviewed_by: user.id,
+      reviewed_at: new Date().toISOString(),
+      admin_notes: input.adminNotes || "Approved — credentials issued",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", app.id);
+
   return {
-    error:
-      "This email has no account yet. Ask them to create an account at /signup, then onboard — approve from Onboarding.",
+    ok: true as const,
+    email,
+    password,
+    organizationId: orgId,
+    trialEndsAt: trialEnds.toISOString(),
+    packageCode: planCode,
   };
 }
 
@@ -1787,12 +2043,16 @@ export async function getPlatformOverviewAction(): Promise<
   if ("error" in gate) return { error: gate.error ?? "Unauthorized" };
   const { admin } = gate;
 
-  const [{ data: orgs }, { data: subs }, proofsRes, catalog] =
+  const [{ data: orgs }, { data: subs }, { data: apps }, proofsRes, catalog] =
     await Promise.all([
       admin
         .from("organizations")
         .select("id, name, verification_status, created_at"),
       admin.from("subscriptions").select("*"),
+      admin
+        .from("applications")
+        .select("id, company_name, status, created_at")
+        .eq("status", "pending"),
       fetchAllRows<Record<string, unknown>>((from, to) =>
         admin
           .from("payment_proofs")
@@ -1805,6 +2065,7 @@ export async function getPlatformOverviewAction(): Promise<
     ]);
 
   const orgList = orgs || [];
+  const appList = apps || [];
   const subList = (subs || []) as Record<string, unknown>[];
   const proofList = proofsRes.rows;
   const approvedProofs = proofList.filter(
@@ -1821,9 +2082,9 @@ export async function getPlatformOverviewAction(): Promise<
     orgList.map((o) => [o.id as string, String(o.name || "—")]),
   );
 
-  const pendingKyc = orgList.filter(
-    (o) => o.verification_status === "pending",
-  ).length;
+  const pendingKyc =
+    orgList.filter((o) => o.verification_status === "pending").length +
+    appList.length;
   const pendingPayments = proofList.filter((p) => p.status === "pending").length;
 
   let trialing = 0;
@@ -1845,6 +2106,15 @@ export async function getPlatformOverviewAction(): Promise<
 
   const needsAttention: PlatformOverviewStats["needsAttention"] = [];
 
+  for (const a of appList) {
+    needsAttention.push({
+      kind: "kyc",
+      organizationId: a.id as string,
+      name: String(a.company_name || "Interest application"),
+      detail: "Pending interest application",
+      at: a.created_at as string,
+    });
+  }
   for (const o of orgList) {
     if (o.verification_status === "pending") {
       needsAttention.push({
