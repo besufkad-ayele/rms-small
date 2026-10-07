@@ -11,9 +11,11 @@ import {
   updateStaffPermissionsAction,
   type StaffMemberRow,
 } from "@/app/app/staff/actions";
+import { useAuth } from "@/components/auth/AuthProvider";
 import {
   STAFF_FEATURE_LABELS,
   defaultPermissionsForRole,
+  isOwner as checkIsOwner,
   type StaffPermissions,
 } from "@/lib/permissions";
 import {
@@ -36,6 +38,14 @@ const PERM_KEYS: PermKey[] = [
   "can_manage_staff",
 ];
 
+/** Owner-only toggles — managers with HR access cannot grant these. */
+const OWNER_ONLY_PERM_KEYS: PermKey[] = ["can_manage_staff"];
+
+function editablePermKeys(asOwner: boolean): PermKey[] {
+  if (asOwner) return PERM_KEYS;
+  return PERM_KEYS.filter((k) => !OWNER_ONLY_PERM_KEYS.includes(k));
+}
+
 const PERM_TO_FEATURE: Record<PermKey, keyof typeof STAFF_FEATURE_LABELS> = {
   can_order: "order",
   can_menu: "menu",
@@ -52,6 +62,10 @@ function emptyPerms(): StaffPermissions {
 }
 
 export function StaffPanel() {
+  const { tenant } = useAuth();
+  const asOwner = tenant ? checkIsOwner(tenant.membership) : false;
+  const visiblePermKeys = editablePermKeys(asOwner);
+
   const [staff, setStaff] = useState<StaffMemberRow[]>([]);
   const [seatsUsed, setSeatsUsed] = useState(0);
   const [seatsMax, setSeatsMax] = useState(2);
@@ -364,7 +378,7 @@ export function StaffPanel() {
               Toggle each area. They will only see what you enable.
             </p>
             <div className="grid gap-2 sm:grid-cols-2">
-              {PERM_KEYS.map((key) => (
+              {visiblePermKeys.map((key) => (
                 <label
                   key={key}
                   className="flex items-center gap-2 rounded-xl bg-white/80 px-3 py-2 text-sm"
@@ -405,6 +419,7 @@ export function StaffPanel() {
               key={row.membershipId}
               row={row}
               busy={busy}
+              asOwner={asOwner}
               onToggleActive={() => void toggleActive(row)}
               onResetPassword={() => void resetPassword(row)}
               onSavePerms={(next, nextRole) =>
@@ -421,12 +436,14 @@ export function StaffPanel() {
 function StaffCard({
   row,
   busy,
+  asOwner,
   onToggleActive,
   onResetPassword,
   onSavePerms,
 }: {
   row: StaffMemberRow;
   busy: boolean;
+  asOwner: boolean;
   onToggleActive: () => void;
   onResetPassword: () => void;
   onSavePerms: (p: StaffPermissions, role?: StaffRole) => void;
@@ -435,7 +452,8 @@ function StaffCard({
   const [localRole, setLocalRole] = useState<StaffRole>(
     row.role === "owner" ? "cashier" : (row.role as StaffRole),
   );
-  const isOwner = row.role === "owner";
+  const isOwnerRow = row.role === "owner";
+  const visiblePermKeys = editablePermKeys(asOwner);
 
   useEffect(() => {
     setLocal(row.permissions);
@@ -460,7 +478,7 @@ function StaffCard({
             {!row.active ? " · inactive" : ""}
           </p>
         </div>
-        {!isOwner ? (
+        {!isOwnerRow ? (
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -491,7 +509,7 @@ function StaffCard({
         )}
       </div>
 
-      {!isOwner ? (
+      {!isOwnerRow ? (
         <div className="mt-4 space-y-3">
           <label className="block text-sm">
             <span className="mb-1 block text-ink/60">Role</span>
@@ -518,7 +536,7 @@ function StaffCard({
             ) : null}
           </label>
           <div className="grid gap-2 sm:grid-cols-2">
-            {PERM_KEYS.map((key) => (
+            {visiblePermKeys.map((key) => (
               <label
                 key={key}
                 className="flex items-center gap-2 rounded-xl bg-stone/40 px-3 py-2 text-sm"

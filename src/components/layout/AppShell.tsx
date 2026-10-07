@@ -43,15 +43,24 @@ const MANAGER_MOBILE_HREFS = [
   "/app/reports",
 ] as const;
 
+/** Put Home in the middle; odd counts keep a true center slot. */
+function withHomeCentered(items: ShellNavItem[], home: ShellNavItem | undefined) {
+  const rest = items.filter((item) => item.href !== "/app");
+  if (!home) return rest;
+  const mid = Math.floor(rest.length / 2);
+  return [...rest.slice(0, mid), home, ...rest.slice(mid)];
+}
+
 function mobileNavForRole(role: MemberRole | undefined, nav: ShellNavItem[]) {
   const inApp = nav.filter((item) => item.href.startsWith("/app"));
+  const home = inApp.find((item) => item.href === "/app");
   if (role === "owner" || role === "manager") {
     const core = inApp.filter((item) =>
       (MANAGER_MOBILE_HREFS as readonly string[]).includes(item.href),
     );
-    return core.length > 0 ? core : inApp;
+    return withHomeCentered(core.length > 0 ? core : inApp, home);
   }
-  return inApp;
+  return withHomeCentered(inApp, home);
 }
 
 export function AppShell({
@@ -369,8 +378,18 @@ export function AppShell({
               {heading}
             </h1>
           </div>
-          <div className="hidden sm:block">
-            <SyncControls compact />
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            {tenant?.organization.logo_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={tenant.organization.logo_url}
+                alt=""
+                className="h-9 w-9 rounded-xl border border-ink/10 bg-paper object-contain p-0.5 sm:h-10 sm:w-10"
+              />
+            ) : null}
+            <div className="hidden sm:block">
+              <SyncControls compact />
+            </div>
           </div>
         </header>
 
@@ -380,7 +399,7 @@ export function AppShell({
           className={cn(
             "w-full flex-1 px-4 pt-5 sm:px-6 sm:pt-6 lg:px-8",
             mobileNav.length > 0
-              ? "pb-[calc(5.25rem+env(safe-area-inset-bottom))] lg:pb-6"
+              ? "pb-[calc(5.75rem+env(safe-area-inset-bottom))] lg:pb-6"
               : "pb-5 sm:pb-6",
           )}
         >
@@ -389,14 +408,13 @@ export function AppShell({
 
         {mobileNav.length > 0 ? (
           <nav
-            className="fixed inset-x-0 bottom-0 z-20 border-t border-ink/8 bg-paper/95 px-1 pt-1 shadow-[0_-10px_28px_-18px_rgba(11,29,26,0.45)] backdrop-blur-md lg:hidden safe-pb"
+            className="fixed inset-x-0 bottom-0 z-20 border-t border-ink/8 bg-paper/95 px-1 pt-2 shadow-[0_-10px_28px_-18px_rgba(11,29,26,0.45)] backdrop-blur-md lg:hidden safe-pb"
             aria-label={t("nav.main")}
           >
             <div
               className={cn(
-                mobileScroll
-                  ? "flex gap-0.5 overflow-x-auto"
-                  : "grid",
+                "items-end",
+                mobileScroll ? "flex gap-0.5 overflow-x-auto" : "grid",
               )}
               style={
                 mobileScroll
@@ -407,6 +425,7 @@ export function AppShell({
               }
             >
               {mobileNav.map((item) => {
+                const isHome = item.href === "/app";
                 const active = item.exact
                   ? pathname === item.href
                   : pathname.startsWith(item.href);
@@ -418,18 +437,39 @@ export function AppShell({
                     aria-current={active ? "page" : undefined}
                     onClick={() => setOpen(false)}
                     className={cn(
-                      "flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-[10px] font-semibold leading-tight",
+                      "relative flex flex-col items-center justify-end gap-0.5 px-1 text-[10px] font-semibold leading-tight",
                       mobileScroll && "min-w-[4.5rem] shrink-0",
-                      active ? "text-teal" : "text-ink/55",
+                      isHome
+                        ? cn(
+                            "-mt-4 min-h-16 pb-1.5 pt-0",
+                            active ? "text-teal" : "text-ink/70",
+                          )
+                        : cn(
+                            "min-h-14 justify-center rounded-xl py-1.5",
+                            active ? "text-teal" : "text-ink/55",
+                          ),
                     )}
                   >
                     <span
                       className={cn(
-                        "flex h-7 w-7 items-center justify-center rounded-lg",
-                        active ? "bg-teal/15 text-teal" : "text-ink/50",
+                        "flex items-center justify-center transition",
+                        isHome
+                          ? cn(
+                              "h-12 w-12 rounded-2xl bg-teal text-white shadow-lg shadow-teal/30 ring-4 ring-paper",
+                              active && "scale-105 shadow-teal/40",
+                            )
+                          : cn(
+                              "h-7 w-7 rounded-lg",
+                              active
+                                ? "bg-teal/15 text-teal"
+                                : "text-ink/50",
+                            ),
                       )}
                     >
-                      <Icon className="h-[18px] w-[18px]" aria-hidden />
+                      <Icon
+                        className={isHome ? "h-5 w-5" : "h-[18px] w-[18px]"}
+                        aria-hidden
+                      />
                     </span>
                     <span className="max-w-full truncate px-0.5">
                       {item.label}

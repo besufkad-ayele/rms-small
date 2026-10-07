@@ -108,27 +108,37 @@ export function RestaurantDetail({
 
       <section className="rounded-3xl border border-ink/8 bg-white p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="font-display text-2xl">{String(org.name)}</h2>
-            <p className="text-sm text-ink/60">
-              {String(org.org_type)} · {String(org.city || "—")}
-            </p>
-            <div className="mt-2 flex flex-wrap gap-1">
-              <StatusPill
-                status={`KYC ${String(org.verification_status || "pending")}`}
-                tone={
-                  org.verification_status === "approved"
-                    ? "teal"
-                    : org.verification_status === "rejected"
-                      ? "coral"
-                      : "gold"
-                }
+          <div className="flex min-w-0 items-start gap-3">
+            {org.logo_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={String(org.logo_url)}
+                alt=""
+                className="h-14 w-14 shrink-0 rounded-2xl border border-ink/10 bg-stone/40 object-contain p-1"
               />
-              <EffectiveStatusPill status={status} />
-              {usage ? <SegmentPill segment={usage.segment} /> : null}
-            </div>
-            <div className="mt-2">
-              <ModuleChips flags={savedFlags} />
+            ) : null}
+            <div className="min-w-0">
+              <h2 className="font-display text-2xl">{String(org.name)}</h2>
+              <p className="text-sm text-ink/60">
+                {String(org.org_type)} · {String(org.city || "—")}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1">
+                <StatusPill
+                  status={`KYC ${String(org.verification_status || "pending")}`}
+                  tone={
+                    org.verification_status === "approved"
+                      ? "teal"
+                      : org.verification_status === "rejected"
+                        ? "coral"
+                        : "gold"
+                  }
+                />
+                <EffectiveStatusPill status={status} />
+                {usage ? <SegmentPill segment={usage.segment} /> : null}
+              </div>
+              <div className="mt-2">
+                <ModuleChips flags={savedFlags} />
+              </div>
             </div>
           </div>
           <div className="text-right text-sm">

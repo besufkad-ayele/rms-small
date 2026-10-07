@@ -213,6 +213,7 @@ export async function deleteOrganizationAction(input: {
   const userIds = (members || []).map((m) => m.user_id as string);
 
   await removeStorageFolder(admin, "menu-images", input.organizationId);
+  await removeStorageFolder(admin, "org-logos", input.organizationId);
   await removeStorageFolder(admin, "payment-proofs", input.organizationId);
   const kyc = [org.business_license_url, org.id_document_url]
     .map((p) => storagePathFromUrl(p as string | null, "kyc-docs"))

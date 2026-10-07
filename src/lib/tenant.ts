@@ -120,6 +120,8 @@ export interface Organization {
   tin: string | null;
   vat_number: string | null;
   website?: string | null;
+  /** Public URL for the restaurant logo (shown in app header). */
+  logo_url?: string | null;
   business_license_url?: string | null;
   id_document_url?: string | null;
   verification_status?: VerificationStatus;

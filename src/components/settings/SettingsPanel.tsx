@@ -22,6 +22,7 @@ import {
   updateMyProfile,
   updateOrganizationProfile,
 } from "@/lib/cloud-auth";
+import { assertMenuImageSize } from "@/lib/menu-image";
 import {
   DEFAULT_PAYMENT_METHODS,
   PAYMENT_KIND_LABELS,
@@ -536,6 +537,11 @@ function BusinessSettings() {
   const [phone, setPhone] = useState(org.phone || "");
   const [email, setEmail] = useState(org.email || "");
   const [address, setAddress] = useState(org.address || "");
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(
+    org.logo_url || null,
+  );
+  const [clearLogo, setClearLogo] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -545,7 +551,11 @@ function BusinessSettings() {
     setPhone(org.phone || "");
     setEmail(org.email || "");
     setAddress(org.address || "");
-  }, [org.name, org.phone, org.email, org.address]);
+    if (!logoFile) {
+      setLogoPreview(org.logo_url || null);
+      setClearLogo(false);
+    }
+  }, [org.name, org.phone, org.email, org.address, org.logo_url, logoFile]);
 
   const orgTypeLabel = useMemo(() => {
     if (org.org_type === "cafe") return "Café";
@@ -553,23 +563,71 @@ function BusinessSettings() {
     return "Other";
   }, [org.org_type]);
 
+  function pickLogo(input: HTMLInputElement) {
+    const file = input.files?.[0] || null;
+    input.value = "";
+    if (!file) return;
+    try {
+      assertMenuImageSize(file);
+      setLogoFile(file);
+      setLogoPreview(URL.createObjectURL(file));
+      setClearLogo(false);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not use this image.");
+    }
+  }
+
+  function removeLogo() {
+    setLogoFile(null);
+    setLogoPreview(null);
+    setClearLogo(true);
+  }
+
   async function onSave(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     setMessage(null);
+    let nextLogoUrl: string | null | undefined;
+    if (logoFile) {
+      try {
+        const { uploadOrgLogo } = await import("@/lib/org-logo");
+        nextLogoUrl = await uploadOrgLogo(org.id, logoFile);
+      } catch (err) {
+        setBusy(false);
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Logo upload failed. Try another image.",
+        );
+        return;
+      }
+    } else if (clearLogo) {
+      try {
+        const { removeOrgLogoFile } = await import("@/lib/org-logo");
+        await removeOrgLogoFile(org.id);
+      } catch {
+        // Storage delete is best-effort; still clear the URL.
+      }
+      nextLogoUrl = null;
+    }
+
     const res = await updateOrganizationProfile({
       orgId: org.id,
       name,
       phone,
       email,
       address,
+      ...(nextLogoUrl !== undefined ? { logo_url: nextLogoUrl } : {}),
     });
     setBusy(false);
     if ("error" in res && res.error) {
       setError(res.error);
       return;
     }
+    setLogoFile(null);
+    setClearLogo(false);
     await refresh();
     setMessage("Business details saved.");
   }
@@ -581,6 +639,46 @@ function BusinessSettings() {
         Shown on receipts and account screens · {orgTypeLabel}
       </p>
       <form className="mt-4 space-y-3" onSubmit={(e) => void onSave(e)}>
+        <div className="rounded-2xl border border-ink/8 bg-stone/40 p-3">
+          <p className="text-sm font-medium text-ink/80">Business logo</p>
+          <p className="mt-0.5 text-xs text-ink/50">
+            Appears in the top-right of your app for staff.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border border-ink/10 bg-paper">
+              {logoPreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={logoPreview}
+                  alt=""
+                  className="h-full w-full object-contain p-1"
+                />
+              ) : (
+                <Building2 className="h-6 w-6 text-ink/25" />
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <label className="cursor-pointer rounded-xl border border-ink/12 bg-paper px-3 py-2 text-sm font-medium text-ink hover:bg-stone/60">
+                {logoPreview ? "Change logo" : "Upload logo"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={(e) => pickLogo(e.currentTarget)}
+                />
+              </label>
+              {logoPreview ? (
+                <button
+                  type="button"
+                  onClick={removeLogo}
+                  className="rounded-xl border border-coral/25 bg-coral/10 px-3 py-2 text-sm font-medium text-coral"
+                >
+                  Remove
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
         <label className="block text-sm">
           <span className="mb-1 block text-ink/60">Business name</span>
           <input

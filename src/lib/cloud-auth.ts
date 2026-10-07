@@ -591,18 +591,23 @@ export async function updateOrganizationProfile(input: {
   phone?: string;
   address?: string;
   email?: string;
+  logo_url?: string | null;
 }) {
   const supabase = createClient();
   const name = input.name.trim();
   if (!name) return { error: "Business name is required." };
+  const patch: Record<string, string | null> = {
+    name,
+    phone: input.phone?.trim() || null,
+    address: input.address?.trim() || null,
+    email: input.email?.trim() || null,
+  };
+  if ("logo_url" in input) {
+    patch.logo_url = input.logo_url?.trim() || null;
+  }
   const { error } = await supabase
     .from("organizations")
-    .update({
-      name,
-      phone: input.phone?.trim() || null,
-      address: input.address?.trim() || null,
-      email: input.email?.trim() || null,
-    })
+    .update(patch)
     .eq("id", input.orgId);
   if (error) return { error: error.message };
   return { ok: true as const };

@@ -102,12 +102,13 @@ async function setAppStaffRoleMeta(
   });
 }
 
-async function requireOrgOwner(): Promise<
+async function requireStaffManager(): Promise<
   | {
       user: { id: string };
       admin: ReturnType<typeof createAdminClient>;
       organizationId: string;
       subscription: Subscription;
+      isOwner: boolean;
     }
   | { error: string }
 > {
@@ -122,13 +123,20 @@ async function requireOrgOwner(): Promise<
     .from("memberships")
     .select("*")
     .eq("user_id", user.id)
-    .eq("role", "owner")
+    .eq("active", true)
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
 
-  if (!membership || membership.active === false) {
-    return { error: "Only the business owner can manage staff." };
+  const isOwner = membership?.role === "owner";
+  const canManage =
+    isOwner || Boolean(membership?.can_manage_staff);
+
+  if (!membership || !canManage) {
+    return {
+      error:
+        "You need the Manage staff permission to do this. Ask the owner to grant it.",
+    };
   }
 
   const { data: subscription } = await admin
@@ -146,6 +154,7 @@ async function requireOrgOwner(): Promise<
     admin,
     organizationId: membership.organization_id as string,
     subscription: subscription as Subscription,
+    isOwner,
   };
 }
 
@@ -153,7 +162,7 @@ export async function getStaffSeatInfoAction(): Promise<
   | { seatsUsed: number; seatsMax: number; planCode: string }
   | { error: string }
 > {
-  const gate = await requireOrgOwner();
+  const gate = await requireStaffManager();
   if ("error" in gate) return { error: gate.error };
   const { admin, organizationId, subscription } = gate;
 
@@ -175,7 +184,7 @@ export async function getStaffSeatInfoAction(): Promise<
 export async function listStaffAction(): Promise<
   { staff: StaffMemberRow[] } | { error: string }
 > {
-  const gate = await requireOrgOwner();
+  const gate = await requireStaffManager();
   if ("error" in gate) return { error: gate.error };
   const { admin, organizationId } = gate;
 
@@ -223,9 +232,9 @@ export async function createStaffAction(input: {
   | { ok: true; email: string; password: string; fullName: string }
   | { error: string }
 > {
-  const gate = await requireOrgOwner();
+  const gate = await requireStaffManager();
   if ("error" in gate) return { error: gate.error };
-  const { user, admin, organizationId, subscription } = gate;
+  const { user, admin, organizationId, subscription, isOwner } = gate;
 
   const email = input.email.trim().toLowerCase();
   const fullName = input.fullName.trim();
@@ -254,9 +263,13 @@ export async function createStaffAction(input: {
 
   const defaults = defaultPermissionsForRole(input.role);
   const perms = permissionsFromFlags({ ...defaults, ...input.permissions });
-  // Never grant staff management / billing unless explicitly toggled by owner
-  if (!input.permissions?.can_manage_staff) perms.can_manage_staff = false;
-  if (!input.permissions?.can_billing) perms.can_billing = false;
+  // Only the owner may grant staff management / billing
+  if (!isOwner || !input.permissions?.can_manage_staff) {
+    perms.can_manage_staff = false;
+  }
+  if (!isOwner || !input.permissions?.can_billing) {
+    perms.can_billing = false;
+  }
 
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
     email,
@@ -303,9 +316,9 @@ export async function updateStaffPermissionsAction(input: {
   role?: Exclude<MemberRole, "owner">;
   permissions: Partial<StaffPermissions>;
 }): Promise<{ ok: true } | { error: string }> {
-  const gate = await requireOrgOwner();
+  const gate = await requireStaffManager();
   if ("error" in gate) return { error: gate.error };
-  const { admin, organizationId } = gate;
+  const { admin, organizationId, isOwner } = gate;
 
   const { data: row } = await admin
     .from("memberships")
@@ -319,6 +332,11 @@ export async function updateStaffPermissionsAction(input: {
   }
 
   const perms = permissionsFromFlags({ ...row, ...input.permissions });
+  // Only the owner may grant or revoke staff management / billing
+  if (!isOwner) {
+    perms.can_manage_staff = Boolean(row.can_manage_staff);
+    perms.can_billing = Boolean(row.can_billing);
+  }
   if (input.role) {
     await setAppStaffRoleMeta(admin, row.user_id, input.role);
     const written = await writeMembershipRole(admin, {
@@ -347,9 +365,9 @@ export async function setStaffActiveAction(input: {
   membershipId: string;
   active: boolean;
 }): Promise<{ ok: true } | { error: string }> {
-  const gate = await requireOrgOwner();
+  const gate = await requireStaffManager();
   if ("error" in gate) return { error: gate.error };
-  const { admin, organizationId, subscription } = gate;
+  const { user, admin, organizationId, subscription } = gate;
 
   const { data: row } = await admin
     .from("memberships")
@@ -359,6 +377,9 @@ export async function setStaffActiveAction(input: {
     .maybeSingle();
   if (!row) return { error: "Staff member not found." };
   if (row.role === "owner") return { error: "Cannot deactivate the owner." };
+  if (row.user_id === user.id) {
+    return { error: "You cannot deactivate your own account." };
+  }
 
   if (input.active) {
     const seatsMax = maxStaffSeats(subscription);
@@ -396,7 +417,7 @@ export async function resetStaffPasswordAction(input: {
   membershipId: string;
   password: string;
 }): Promise<{ ok: true; password: string } | { error: string }> {
-  const gate = await requireOrgOwner();
+  const gate = await requireStaffManager();
   if ("error" in gate) return { error: gate.error };
   const { admin, organizationId } = gate;
 

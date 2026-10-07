@@ -443,20 +443,39 @@ function SubscriberRow({
         onClick={() => onOpen(String(org.id))}
         className="grid w-full grid-cols-[1.4fr_1.15fr_0.85fr_1.5fr_1fr] items-center gap-3 px-4 py-3 text-left text-sm hover:bg-stone/40"
       >
-        <span className="min-w-0">
-          <span className="font-medium">{String(org.name)}</span>
-          <span className="mt-0.5 block truncate text-xs text-ink/45">
-            {row.owner?.full_name || "—"} · {String(org.city || "—")} ·{" "}
-            {String(org.phone || "—")}
-          </span>
-          {org.verification_status !== "approved" ? (
-            <span className="mt-1 inline-block">
-              <StatusPill
-                status={`KYC ${String(org.verification_status || "pending")}`}
-                tone={org.verification_status === "rejected" ? "coral" : "gold"}
-              />
+        <span className="flex min-w-0 items-start gap-2.5">
+          {org.logo_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={String(org.logo_url)}
+              alt=""
+              className="mt-0.5 h-9 w-9 shrink-0 rounded-xl border border-ink/10 bg-stone/40 object-contain p-0.5"
+            />
+          ) : (
+            <span
+              className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-ink/8 bg-stone/50 text-[11px] font-semibold uppercase text-ink/35"
+              aria-hidden
+            >
+              {String(org.name || "?").slice(0, 1)}
             </span>
-          ) : null}
+          )}
+          <span className="min-w-0">
+            <span className="font-medium">{String(org.name)}</span>
+            <span className="mt-0.5 block truncate text-xs text-ink/45">
+              {row.owner?.full_name || "—"} · {String(org.city || "—")} ·{" "}
+              {String(org.phone || "—")}
+            </span>
+            {org.verification_status !== "approved" ? (
+              <span className="mt-1 inline-block">
+                <StatusPill
+                  status={`KYC ${String(org.verification_status || "pending")}`}
+                  tone={
+                    org.verification_status === "rejected" ? "coral" : "gold"
+                  }
+                />
+              </span>
+            ) : null}
+          </span>
         </span>
 
         <span className="min-w-0">
@@ -568,11 +587,30 @@ function SubscriberCard({
         className="w-full rounded-3xl border border-ink/8 bg-white p-4 text-left"
       >
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className="font-display text-lg leading-tight">{String(org.name)}</p>
-            <p className="mt-0.5 truncate text-xs text-ink/50">
-              {row.owner?.full_name || "—"} · {String(org.city || "—")}
-            </p>
+          <div className="flex min-w-0 items-start gap-2.5">
+            {org.logo_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={String(org.logo_url)}
+                alt=""
+                className="h-10 w-10 shrink-0 rounded-xl border border-ink/10 bg-stone/40 object-contain p-0.5"
+              />
+            ) : (
+              <span
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-ink/8 bg-stone/50 text-xs font-semibold uppercase text-ink/35"
+                aria-hidden
+              >
+                {String(org.name || "?").slice(0, 1)}
+              </span>
+            )}
+            <div className="min-w-0">
+              <p className="font-display text-lg leading-tight">
+                {String(org.name)}
+              </p>
+              <p className="mt-0.5 truncate text-xs text-ink/50">
+                {row.owner?.full_name || "—"} · {String(org.city || "—")}
+              </p>
+            </div>
           </div>
           <EffectiveStatusPill status={e.status} />
         </div>
