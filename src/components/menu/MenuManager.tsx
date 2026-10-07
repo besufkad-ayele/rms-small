@@ -183,7 +183,9 @@ export function MenuManager() {
   }
 
   function addCustomTag() {
-    const next = normalizeTags([customTag]);
+    const next = normalizeTags([customTag]).filter(
+      (tag) => tag !== "food" && tag !== "drink",
+    );
     if (!next.length) return;
     setTags((prev) => normalizeTags([...prev, ...next]));
     setCustomTag("");

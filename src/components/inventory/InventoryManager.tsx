@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, History, Package, Pencil, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { FieldLabel } from "@/components/ui/FieldLabel";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import {
   seedOrgCatalog,
@@ -117,6 +118,7 @@ export function InventoryManager() {
   const grouped = useMemo(() => groupUnitsByKind(units), [units]);
 
   function startEdit(item: CloudInventoryItem) {
+    setMessage(null);
     setEditing(item);
     const match =
       units.find((u) => u.id === item.unit_id) ||
@@ -139,30 +141,35 @@ export function InventoryManager() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    setMessage(null);
     const unit =
       units.find((u) => u.id === form.unit_id) ||
       units.find((u) => u.code === form.unit);
-    const { offlineQueued } = await upsertInventoryResilient(orgId, {
-      id: editing?.id,
-      name: form.name,
-      unit: unit?.code || form.unit,
-      unit_id: unit?.id || form.unit_id || null,
-      stock_qty: form.stock_qty,
-      low_stock_threshold: form.low_stock_threshold,
-      cost_per_unit: form.cost_per_unit,
-    });
-    setEditing(null);
-    const defaultUnit = units.find((x) => x.code === "kg") || units[0];
-    setForm({
-      name: "",
-      unit: defaultUnit?.code || "kg",
-      unit_id: defaultUnit?.id || "",
-      stock_qty: 0,
-      low_stock_threshold: 1,
-      cost_per_unit: 0,
-    });
-    if (offlineQueued) await refreshPendingCount();
-    await reload();
+    try {
+      const { offlineQueued } = await upsertInventoryResilient(orgId, {
+        id: editing?.id,
+        name: form.name,
+        unit: unit?.code || form.unit,
+        unit_id: unit?.id || form.unit_id || null,
+        stock_qty: form.stock_qty,
+        low_stock_threshold: form.low_stock_threshold,
+        cost_per_unit: form.cost_per_unit,
+      });
+      setEditing(null);
+      const defaultUnit = units.find((x) => x.code === "kg") || units[0];
+      setForm({
+        name: "",
+        unit: defaultUnit?.code || "kg",
+        unit_id: defaultUnit?.id || "",
+        stock_qty: 0,
+        low_stock_threshold: 1,
+        cost_per_unit: 0,
+      });
+      if (offlineQueued) await refreshPendingCount();
+      await reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Save failed");
+    }
   }
 
   async function confirmDelete() {
@@ -317,15 +324,17 @@ export function InventoryManager() {
                 Adjust thresholds and cost. New stock goes through Receive.
               </p>
               <form className="mt-4 space-y-3" onSubmit={(e) => void onSubmit(e)}>
-                <input
-                  required
-                  className="field"
-                  placeholder="Name"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                />
+                <label className="block text-sm">
+                  <FieldLabel required>Name</FieldLabel>
+                  <input
+                    required
+                    className="field"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  />
+                </label>
                 <div>
-                  <label className="mb-1 block text-xs text-ink/55">Unit</label>
+                  <FieldLabel required>Unit</FieldLabel>
                   <select
                     required
                     className="field"
@@ -346,9 +355,7 @@ export function InventoryManager() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="block text-sm">
-                    <span className="mb-1 block text-xs text-ink/55">
-                      Stock qty
-                    </span>
+                    <FieldLabel required>Stock qty</FieldLabel>
                     <input
                       required
                       type="number"
@@ -362,9 +369,7 @@ export function InventoryManager() {
                     />
                   </label>
                   <label className="block text-sm">
-                    <span className="mb-1 block text-xs text-ink/55">
-                      Low-stock alert
-                    </span>
+                    <FieldLabel required>Low-stock alert</FieldLabel>
                     <input
                       type="number"
                       min={0}
@@ -381,9 +386,9 @@ export function InventoryManager() {
                   </label>
                 </div>
                 <label className="block text-sm">
-                  <span className="mb-1 block text-xs text-ink/55">
+                  <FieldLabel required>
                     Cost per {form.unit || "unit"} (ETB)
-                  </span>
+                  </FieldLabel>
                   <input
                     required
                     type="number"
@@ -399,6 +404,9 @@ export function InventoryManager() {
                     }
                   />
                 </label>
+                {message ? (
+                  <p className="text-sm text-coral">{message}</p>
+                ) : null}
                 <button
                   type="submit"
                   className="w-full rounded-xl bg-teal py-3 text-sm font-semibold text-white"

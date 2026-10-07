@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
   PHONE_COUNTRIES,
   assessPhone,
@@ -28,15 +28,14 @@ export function PhoneField({
   const initial = parseStoredPhone(defaultValue);
   const [iso, setIso] = useState(initial.iso);
   const [national, setNational] = useState(initial.national);
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
 
   const country = countryByIso(iso);
   const assessment = assessPhone({ iso, national, required });
+  const shownError = assessment.national ? assessment.error : null;
 
   useEffect(() => {
-    onChangeRef.current(assessment);
-  }, [assessment.iso, assessment.national, assessment.e164, assessment.error, required]);
+    onChange(assessPhone({ iso, national, required }));
+  }, [iso, national, required, onChange]);
 
   function commitNational(nextIso: string, raw: string) {
     const nextCountry = countryByIso(nextIso);
@@ -95,7 +94,7 @@ export function PhoneField({
           autoComplete="tel-national"
           className={cn(control, "min-w-0 flex-1")}
           placeholder={country.iso === "ET" ? "911234567" : `${country.digits} digits`}
-          aria-invalid={assessment.error ? true : undefined}
+          aria-invalid={shownError ? true : undefined}
           value={national}
           onChange={(e) => commitNational(iso, e.target.value)}
         />
@@ -103,15 +102,14 @@ export function PhoneField({
       <p
         className={cn(
           "mt-1 text-xs",
-          assessment.error
+          shownError
             ? "text-coral"
             : tone === "dark"
               ? "text-stone/45"
               : "text-ink/45",
         )}
       >
-        {assessment.error ||
-          `${country.digits} digits after +${country.dial}`}
+        {shownError || `${country.digits} digits after +${country.dial}`}
       </p>
     </div>
   );

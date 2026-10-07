@@ -2,6 +2,9 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { FieldLabel } from "@/components/ui/FieldLabel";
+import { PhoneField } from "@/components/ui/PhoneField";
+import type { PhoneAssessment } from "@/lib/phone";
 import {
   listMovements,
   listSuppliers,
@@ -50,6 +53,9 @@ export function InventoryReceive() {
 
   const [supName, setSupName] = useState("");
   const [supPhone, setSupPhone] = useState("");
+  const [supPhoneState, setSupPhoneState] = useState<PhoneAssessment | null>(
+    null,
+  );
   const [supLocation, setSupLocation] = useState("");
   const [supNotes, setSupNotes] = useState("");
   const [editingSupplierId, setEditingSupplierId] = useState<string | null>(
@@ -173,12 +179,16 @@ export function InventoryReceive() {
   async function onSupplier(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (supPhoneState?.error) {
+      setError(supPhoneState.error);
+      return;
+    }
     try {
       const wasEdit = Boolean(editingSupplierId);
       const saved = await upsertSupplier(orgId, {
         id: editingSupplierId || undefined,
         name: supName,
-        phone: supPhone,
+        phone: supPhoneState?.e164 || "",
         location: supLocation,
         notes: supNotes,
       });
@@ -253,7 +263,7 @@ export function InventoryReceive() {
         {mode === "new" ? (
           <>
             <label className="block text-sm sm:col-span-2">
-              <span className="mb-1 block text-ink/60">Item name *</span>
+              <FieldLabel required>Item name</FieldLabel>
               <input
                 required
                 className="field"
@@ -263,7 +273,7 @@ export function InventoryReceive() {
               />
             </label>
             <label className="block text-sm sm:col-span-2">
-              <span className="mb-1 block text-ink/60">Measurement *</span>
+              <FieldLabel required>Measurement</FieldLabel>
               <select
                 required
                 className="field"
@@ -313,7 +323,7 @@ export function InventoryReceive() {
               ) : null}
             </label>
             <label className="block text-sm">
-              <span className="mb-1 block text-ink/60">Low-stock alert</span>
+              <FieldLabel>Low-stock alert</FieldLabel>
               <input
                 type="number"
                 min={0}
@@ -326,7 +336,7 @@ export function InventoryReceive() {
           </>
         ) : (
           <label className="block text-sm sm:col-span-2">
-            <span className="mb-1 block text-ink/60">Inventory item *</span>
+            <FieldLabel required>Inventory item</FieldLabel>
             <select
               required
               className="field"
@@ -344,7 +354,7 @@ export function InventoryReceive() {
         )}
 
         <label className="block text-sm">
-          <span className="mb-1 block text-ink/60">Quantity *</span>
+          <FieldLabel required>Quantity</FieldLabel>
           <input
             required
             type="number"
@@ -356,7 +366,7 @@ export function InventoryReceive() {
           />
         </label>
         <label className="block text-sm">
-          <span className="mb-1 block text-ink/60">Cost / unit (ETB) *</span>
+          <FieldLabel required>Cost / unit (ETB)</FieldLabel>
           <input
             required
             type="number"
@@ -368,7 +378,7 @@ export function InventoryReceive() {
           />
         </label>
         <label className="block text-sm sm:col-span-2">
-          <span className="mb-1 block text-ink/60">Supplier *</span>
+          <FieldLabel required>Supplier</FieldLabel>
           <select
             required
             className="field"
@@ -386,7 +396,7 @@ export function InventoryReceive() {
           </select>
         </label>
         <label className="block text-sm">
-          <span className="mb-1 block text-ink/60">Buy date *</span>
+          <FieldLabel required>Buy date</FieldLabel>
           <input
             required
             type="date"
@@ -396,7 +406,7 @@ export function InventoryReceive() {
           />
         </label>
         <label className="block text-sm">
-          <span className="mb-1 block text-ink/60">Expiry date *</span>
+          <FieldLabel required>Expiry date</FieldLabel>
           <input
             required
             type="date"
@@ -406,7 +416,7 @@ export function InventoryReceive() {
           />
         </label>
         <div className="sm:col-span-2">
-          <span className="mb-1 block text-sm text-ink/60">Payment *</span>
+          <FieldLabel required>Payment</FieldLabel>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -436,12 +446,11 @@ export function InventoryReceive() {
           </p>
         </div>
         <label className="block text-sm sm:col-span-2">
-          <span className="mb-1 block text-ink/60">Note</span>
+          <FieldLabel>Note</FieldLabel>
           <input
             className="field"
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Optional"
           />
         </label>
         <button
@@ -463,31 +472,39 @@ export function InventoryReceive() {
           <p className="text-sm text-ink/55">
             Who you buy from — name, phone, location.
           </p>
-          <input
-            required
-            className="field"
-            placeholder="Name *"
-            value={supName}
-            onChange={(e) => setSupName(e.target.value)}
-          />
-          <input
-            className="field"
-            placeholder="Phone"
-            value={supPhone}
-            onChange={(e) => setSupPhone(e.target.value)}
-          />
-          <input
-            className="field"
-            placeholder="Location"
-            value={supLocation}
-            onChange={(e) => setSupLocation(e.target.value)}
-          />
-          <textarea
-            className="field min-h-16"
-            placeholder="Notes (optional)"
-            value={supNotes}
-            onChange={(e) => setSupNotes(e.target.value)}
-          />
+          <label className="block text-sm">
+            <FieldLabel required>Name</FieldLabel>
+            <input
+              required
+              className="field"
+              value={supName}
+              onChange={(e) => setSupName(e.target.value)}
+            />
+          </label>
+          <div className="text-sm">
+            <FieldLabel>Phone</FieldLabel>
+            <PhoneField
+              key={editingSupplierId ?? "new-supplier"}
+              defaultValue={supPhone}
+              onChange={setSupPhoneState}
+            />
+          </div>
+          <label className="block text-sm">
+            <FieldLabel>Location</FieldLabel>
+            <input
+              className="field"
+              value={supLocation}
+              onChange={(e) => setSupLocation(e.target.value)}
+            />
+          </label>
+          <label className="block text-sm">
+            <FieldLabel>Notes</FieldLabel>
+            <textarea
+              className="field min-h-16"
+              value={supNotes}
+              onChange={(e) => setSupNotes(e.target.value)}
+            />
+          </label>
           <button
             type="submit"
             className="w-full rounded-xl bg-ink py-2.5 text-sm font-semibold text-stone"

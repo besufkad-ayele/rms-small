@@ -4,11 +4,12 @@ import { useEffect } from "react";
 import { CloudOff, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useI18n } from "@/components/i18n/LocaleProvider";
 import { useOfflineSync } from "./OfflineSyncProvider";
+import { localeIntlTag } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export function SyncSuccessDialog() {
   const { syncDialog, closeSyncDialog } = useOfflineSync();
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
 
   useEffect(() => {
     if (!syncDialog.open) return;
@@ -175,7 +176,7 @@ export function SyncControls({
         <p className={cn("text-[10px]", dark ? "text-stone/45" : "text-ink/45")}>
           {t("sync.last", {
             time: new Date(lastSyncedAt).toLocaleTimeString(
-              locale === "am" ? "am-ET" : "en-ET",
+              localeIntlTag(locale),
             ),
           })}
         </p>

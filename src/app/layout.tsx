@@ -67,7 +67,7 @@ export default function RootLayout({
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var e=document.documentElement;var k='aramis-theme';var m=localStorage.getItem(k)||'system';var d=m==='dark'||(m!=='light'&&window.matchMedia('(prefers-color-scheme: dark)').matches);e.classList.toggle('dark',d);e.dataset.theme=d?'dark':'light';e.style.colorScheme=d?'dark':'light';var l=localStorage.getItem('aramis-locale');if(l==='am'||l==='en'){e.lang=l;e.dataset.locale=l;}}catch(err){}})();`,
+            __html: `(function(){try{var e=document.documentElement;var k='aramis-theme';var m=localStorage.getItem(k)||'system';var d=m==='dark'||(m!=='light'&&window.matchMedia('(prefers-color-scheme: dark)').matches);e.classList.toggle('dark',d);e.dataset.theme=d?'dark':'light';e.style.colorScheme=d?'dark':'light';var l=localStorage.getItem('aramis-locale');if({en:1,am:1,om:1,so:1,ti:1}[l]){e.lang=l;e.dataset.locale=l;}}catch(err){}})();`,
           }}
         />
       </head>

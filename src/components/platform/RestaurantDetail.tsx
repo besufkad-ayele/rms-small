@@ -1,15 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { assignPublicSlugAction } from "@/app/m/actions";
+import { useState } from "react";
 import {
-  addAdminNoteAction,
-  expireAccessAction,
-  extendTrialAction,
-  grantPaidMonthsAction,
-  setFollowUpAction,
-  startTrialAction,
-  updateTenantSubscriptionAction,
   type PaymentProofRow,
   type PlatformTenantRow,
 } from "@/app/platform/actions";
@@ -22,20 +14,18 @@ import {
   relativeDays,
   type TenantUsage,
 } from "@/lib/platform-metrics";
-import { includedSeatsFromFlags, packageModuleFlags, type PackageRow } from "@/lib/pricing";
-import { APP_MODULE_LABELS, type AppModule, type SubStatus } from "@/lib/tenant";
+import { includedSeatsFromFlags, type PackageRow } from "@/lib/pricing";
+import { APP_MODULE_LABELS, type AppModule } from "@/lib/tenant";
 import { cn, formatDateTime, formatMoney } from "@/lib/utils";
 import {
   EffectiveStatusPill,
   flagsFromSub,
-  fromDatetimeLocalValue,
   Info,
   MODULES,
-  ModuleCheckboxes,
+  ModuleChips,
   ScoreBar,
   SegmentPill,
   StatusPill,
-  toDatetimeLocalValue,
   TrendBadge,
   type ModuleState,
 } from "./platform-ui";
@@ -44,8 +34,9 @@ import { DangerZone } from "./DangerZone";
 import { OrgProfileEditor } from "./OrgProfileEditor";
 import { OwnerLoginCard } from "./OwnerLoginCard";
 import { PaymentRecords } from "./PaymentAdmin";
+import { PlanAccess } from "./PlanAccess";
 import { StaffManager } from "./StaffManager";
-import { ActionButton, AsyncForm, SubmitButton, throwIfError } from "./feedback";
+import { ActionButton } from "./feedback";
 
 const MODULE_USAGE_HINT: Partial<Record<AppModule, string>> = {
   menu: "has menu items",
@@ -94,44 +85,16 @@ export function RestaurantDetail({
   const loginEmail = String(
     row.ownerAuthEmail || row.owner?.email || org.email || "",
   );
-  const [mods, setMods] = useState<ModuleState>(flagsFromSub(sub));
-  const [pkgCode, setPkgCode] = useState(
-    String(sub?.package_code || sub?.plan_code || ""),
-  );
-  const [trialDays, setTrialDays] = useState(14);
-  const [trialMonths, setTrialMonths] = useState(0);
-  const [trialEndsLocal, setTrialEndsLocal] = useState("");
-  const [extendDays, setExtendDays] = useState(14);
-  const [extendEndsLocal, setExtendEndsLocal] = useState("");
-  const [grantMonths, setGrantMonths] = useState(1);
-  const [grantEndsLocal, setGrantEndsLocal] = useState("");
-  const [extraSeats, setExtraSeats] = useState(
-    Number(sub?.extra_staff_seats ?? 0),
-  );
-  const [followUpLocal, setFollowUpLocal] = useState("");
-  const [followUpNote, setFollowUpNote] = useState("");
-  const [note, setNote] = useState("");
   const [editingProfile, setEditingProfile] = useState(false);
   const status = effectiveStatus(sub);
   const accessEnd = accessEndOf(sub);
   const endDays = daysUntil(accessEnd);
-  const seats = Number(sub?.max_staff_seats ?? 0);
-  const includedSeats = includedSeatsFromFlags(mods);
+  const savedFlags = flagsFromSub(sub);
+  const includedSeats = includedSeatsFromFlags(savedFlags);
+  const extraSeats = Number(sub?.extra_staff_seats ?? 0);
+  const seats = Number(sub?.max_staff_seats ?? includedSeats + extraSeats);
   const publicSlug = String(org.public_slug || "");
-
-  useEffect(() => {
-    setMods(flagsFromSub(sub));
-    setPkgCode(String(sub?.package_code || sub?.plan_code || ""));
-    setExtraSeats(Number(sub?.extra_staff_seats ?? 0));
-    setFollowUpLocal(toDatetimeLocalValue(sub?.follow_up_at as string | null));
-    setFollowUpNote(String(sub?.follow_up_note || ""));
-    if (sub?.status === "trialing" && sub.trial_ends_at) {
-      setExtendEndsLocal(toDatetimeLocalValue(String(sub.trial_ends_at)));
-      setTrialEndsLocal(toDatetimeLocalValue(String(sub.trial_ends_at)));
-    } else if (sub?.current_period_end) {
-      setGrantEndsLocal(toDatetimeLocalValue(String(sub.current_period_end)));
-    }
-  }, [sub]);
+  const staffInUse = usage?.staffActive;
 
   return (
     <div className="space-y-4">
@@ -164,6 +127,9 @@ export function RestaurantDetail({
               <EffectiveStatusPill status={status} />
               {usage ? <SegmentPill segment={usage.segment} /> : null}
             </div>
+            <div className="mt-2">
+              <ModuleChips flags={savedFlags} />
+            </div>
           </div>
           <div className="text-right text-sm">
             <p
@@ -177,6 +143,13 @@ export function RestaurantDetail({
             <p className="text-xs text-ink/50">
               {accessEnd ? formatDateTime(accessEnd) : "—"}
             </p>
+            <a href="#plan-access" className="mt-2 block font-display text-2xl leading-none">
+              {seats}
+            </a>
+            <a href="#plan-access" className="text-[11px] text-ink/50 underline">
+              staff seats
+              {staffInUse !== undefined ? ` · ${staffInUse} in use` : ""}
+            </a>
           </div>
         </div>
 
@@ -249,40 +222,12 @@ export function RestaurantDetail({
           <Info label="VAT" value={String(org.vat_number || "—")} />
           <Info label="Website" value={String(org.website || "—")} />
           <Info
-            label="Plan / package"
-            value={String(sub?.plan_code || sub?.package_code || "—")}
-          />
-          <Info
-            label="Trial ends"
-            value={
-              sub?.trial_ends_at
-                ? formatDateTime(String(sub.trial_ends_at))
-                : "—"
-            }
-          />
-          <Info
-            label="Paid access ends"
-            value={
-              sub?.current_period_end
-                ? formatDateTime(String(sub.current_period_end))
-                : "—"
-            }
-          />
-          <Info
-            label="Staff seats"
-            value={`${includedSeats} included${extraSeats ? ` + ${extraSeats} extra` : ""} · ${seats || includedSeats + extraSeats} total`}
-          />
-          <Info
             label="Public menu"
             value={publicSlug ? `/m/${publicSlug}` : "not published"}
           />
           <Info
-            label="Follow-up"
-            value={
-              sub?.follow_up_at
-                ? formatDateTime(String(sub.follow_up_at))
-                : "—"
-            }
+            label="Staff seats"
+            value={`${includedSeats} included${extraSeats ? ` + ${extraSeats} extra` : ""} · ${seats} total`}
           />
         </dl>
 
@@ -312,6 +257,15 @@ export function RestaurantDetail({
         ) : null}
       </section>
 
+      <PlanAccess
+        key={`${String(sub?.updated_at || "")}:${String(org.updated_at || "")}:${publicSlug}`}
+        row={row}
+        usage={usage}
+        packages={packages}
+        flashOk={flashOk}
+        onReload={onReload}
+      />
+
       <OwnerLoginCard key={orgId} row={row} flashOk={flashOk} />
 
       <UsagePanel
@@ -322,483 +276,6 @@ export function RestaurantDetail({
         seats={seats}
         ownerLastSignInAt={row.ownerLastSignInAt}
       />
-
-      <section className="rounded-3xl border border-ink/8 bg-white p-4 sm:p-5">
-        <h3 className="font-display text-lg">Access, trial & public menu</h3>
-        <p className="mt-1 text-sm text-ink/55">
-          Pick an exact end date, or add days/months. One staff seat is included
-          per selected module; extra seats are a one-time add-on.
-        </p>
-        {mods.online ? (
-          <div className="mt-3 rounded-2xl bg-teal/10 p-3 text-sm">
-            <p className="text-xs font-semibold text-ink/60">Public menu URL</p>
-            <p className="mt-1 font-medium">
-              {publicSlug ? `/m/${publicSlug}` : "Not assigned yet"}
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {publicSlug ? (
-                <a
-                  className="rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-teal underline"
-                  href={`/m/${publicSlug}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open public page
-                </a>
-              ) : null}
-              <ActionButton
-                pendingLabel="Publishing…"
-                className="rounded-lg bg-teal px-2.5 py-1 text-xs font-semibold text-white"
-                onAction={async () => {
-                  const res = await assignPublicSlugAction(
-                    orgId,
-                    String(org.name),
-                    Boolean(publicSlug),
-                  );
-                  throwIfError(res, "Could not publish URL");
-                  if ("slug" in res) {
-                    await flashOk(`Public menu at /m/${res.slug}`);
-                  }
-                  await onReload();
-                }}
-              >
-                {publicSlug ? "Regenerate slug" : "Publish public URL"}
-              </ActionButton>
-            </div>
-          </div>
-        ) : (
-          <p className="mt-3 text-xs text-ink/45">
-            Enable Website & public ordering to publish /m/{"{slug}"} for guest
-            orders.
-          </p>
-        )}
-        <div className="mt-3 grid gap-3 lg:grid-cols-2">
-          <div className="space-y-2 rounded-2xl bg-stone/40 p-3">
-            <p className="text-xs font-semibold text-ink/60">Start trial</p>
-            <label className="block text-xs text-ink/55">
-              Ends on (preferred)
-              <input
-                type="datetime-local"
-                className="field mt-1"
-                value={trialEndsLocal}
-                onChange={(e) => setTrialEndsLocal(e.target.value)}
-              />
-            </label>
-            <p className="text-[10px] text-ink/40">
-              Or use days / months below if no date set
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                type="number"
-                className="field"
-                value={trialDays}
-                onChange={(e) => setTrialDays(Number(e.target.value) || 14)}
-                title="Days"
-              />
-              <input
-                type="number"
-                className="field"
-                value={trialMonths}
-                onChange={(e) => setTrialMonths(Number(e.target.value) || 0)}
-                title="Months override"
-                placeholder="Months"
-              />
-            </div>
-            <ModuleCheckboxes value={mods} onChange={setMods} dense />
-            <label className="block text-xs">
-              Extra staff seats (one-time)
-              <input
-                type="number"
-                min={0}
-                className="field mt-1"
-                value={extraSeats}
-                onChange={(e) =>
-                  setExtraSeats(Math.max(0, Number(e.target.value) || 0))
-                }
-              />
-              <span className="mt-1 block text-[10px] text-ink/40">
-                {includedSeats} included from modules
-                {extraSeats ? ` + ${extraSeats} extra` : ""}
-              </span>
-            </label>
-            <label className="block text-xs">
-              Package
-              <select
-                className="field mt-1"
-                value={pkgCode}
-                onChange={(e) => {
-                  const code = e.target.value;
-                  setPkgCode(code);
-                  const pkg = packages.find((p) => p.code === code);
-                  if (pkg) setMods(packageModuleFlags(pkg));
-                }}
-              >
-                <option value="">Custom</option>
-                {packages.map((p) => (
-                  <option key={p.id} value={p.code}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <ActionButton
-              pendingLabel="Starting…"
-              className="rounded-xl bg-teal px-3 py-2 text-xs font-semibold text-white"
-              onAction={async () => {
-                const res = await startTrialAction({
-                  organizationId: orgId,
-                  trialDays,
-                  trialMonths: trialMonths || undefined,
-                  trialEndsAt: fromDatetimeLocalValue(trialEndsLocal),
-                  menuEnabled: mods.menu,
-                  orderingEnabled: mods.ordering,
-                  kitchenEnabled: mods.kitchen,
-                  inventoryEnabled: mods.inventory,
-                  financeEnabled: mods.finance,
-                  hrEnabled: mods.hr,
-                  onlineEnabled: mods.online,
-                  extraStaffSeats: extraSeats,
-                  packageCode: pkgCode || null,
-                  issuePassword: false,
-                  notes: "Trial started from restaurant detail",
-                  followUpAt: fromDatetimeLocalValue(followUpLocal),
-                  followUpNote: followUpNote || undefined,
-                });
-                throwIfError(res, "Failed");
-                if ("trialEndsAt" in res) {
-                  await flashOk(
-                    `Trial started · ends ${formatDateTime(String(res.trialEndsAt))}`,
-                  );
-                }
-                await onReload();
-              }}
-            >
-              Start trial
-            </ActionButton>
-          </div>
-
-          <div className="space-y-2 rounded-2xl bg-stone/40 p-3">
-            <p className="text-xs font-semibold text-ink/60">Extend trial</p>
-            <label className="block text-xs text-ink/55">
-              New trial end date
-              <input
-                type="datetime-local"
-                className="field mt-1"
-                value={extendEndsLocal}
-                onChange={(e) => setExtendEndsLocal(e.target.value)}
-              />
-            </label>
-            <p className="text-[10px] text-ink/40">
-              Or add days from current trial end
-            </p>
-            <input
-              type="number"
-              className="field"
-              value={extendDays}
-              onChange={(e) => setExtendDays(Number(e.target.value) || 1)}
-            />
-            <ActionButton
-              pendingLabel="Saving…"
-              className="rounded-xl bg-ink px-3 py-2 text-xs font-semibold text-stone"
-              onAction={async () => {
-                const res = await extendTrialAction({
-                  organizationId: orgId,
-                  endsAt: fromDatetimeLocalValue(extendEndsLocal),
-                  addDays: extendEndsLocal ? undefined : extendDays,
-                  followUpAt: fromDatetimeLocalValue(followUpLocal),
-                  followUpNote: followUpNote || undefined,
-                });
-                throwIfError(res, "Failed");
-                if ("trialEndsAt" in res) {
-                  await flashOk(
-                    `Trial ends ${formatDateTime(String(res.trialEndsAt))}`,
-                  );
-                }
-                await onReload();
-              }}
-            >
-              {extendEndsLocal
-                ? "Set trial end date"
-                : `Extend +${extendDays} days`}
-            </ActionButton>
-          </div>
-
-          <div className="space-y-2 rounded-2xl bg-stone/40 p-3">
-            <p className="text-xs font-semibold text-ink/60">
-              Grant paid access (no proof)
-            </p>
-            <label className="block text-xs text-ink/55">
-              Access until
-              <input
-                type="datetime-local"
-                className="field mt-1"
-                value={grantEndsLocal}
-                onChange={(e) => setGrantEndsLocal(e.target.value)}
-              />
-            </label>
-            <p className="text-[10px] text-ink/40">
-              Or add months from current period
-            </p>
-            <select
-              className="field"
-              value={grantMonths}
-              onChange={(e) => setGrantMonths(Number(e.target.value))}
-            >
-              {[1, 3, 6, 12].map((n) => (
-                <option key={n} value={n}>
-                  {n} month{n > 1 ? "s" : ""}
-                </option>
-              ))}
-            </select>
-            <ActionButton
-              pendingLabel="Saving…"
-              className="rounded-xl bg-teal px-3 py-2 text-xs font-semibold text-white"
-              onAction={async () => {
-                const res = await grantPaidMonthsAction({
-                  organizationId: orgId,
-                  months: grantEndsLocal ? undefined : grantMonths,
-                  periodEndsAt: fromDatetimeLocalValue(grantEndsLocal),
-                  menuEnabled: mods.menu,
-                  orderingEnabled: mods.ordering,
-                  kitchenEnabled: mods.kitchen,
-                  inventoryEnabled: mods.inventory,
-                  financeEnabled: mods.finance,
-                  hrEnabled: mods.hr,
-                  onlineEnabled: mods.online,
-                  extraStaffSeats: extraSeats,
-                  packageCode: pkgCode || null,
-                  followUpAt: fromDatetimeLocalValue(followUpLocal),
-                  followUpNote: followUpNote || undefined,
-                });
-                throwIfError(res, "Failed");
-                if ("periodEnd" in res) {
-                  await flashOk(
-                    `Paid until ${formatDateTime(String(res.periodEnd))}`,
-                  );
-                }
-                await onReload();
-              }}
-            >
-              {grantEndsLocal ? "Set paid end date" : "Grant months"}
-            </ActionButton>
-          </div>
-
-          <div className="space-y-2 rounded-2xl bg-stone/40 p-3">
-            <p className="text-xs font-semibold text-ink/60">Expire / cancel</p>
-            <div className="flex flex-wrap gap-2">
-              <ActionButton
-                pendingLabel="Expiring…"
-                className="rounded-xl border border-coral/30 bg-coral/10 px-3 py-2 text-xs font-semibold text-coral"
-                onAction={async () => {
-                  if (
-                    !window.confirm(
-                      `Expire access for ${String(org.name)}? Their staff lose access immediately.`,
-                    )
-                  )
-                    return;
-                  const res = await expireAccessAction({
-                    organizationId: orgId,
-                    mode: "expired",
-                  });
-                  throwIfError(res, "Failed");
-                  await flashOk("Access expired");
-                  await onReload();
-                }}
-              >
-                Expire access
-              </ActionButton>
-              <ActionButton
-                pendingLabel="Canceling…"
-                className="rounded-xl border border-coral/30 px-3 py-2 text-xs font-semibold text-coral"
-                onAction={async () => {
-                  if (
-                    !window.confirm(
-                      `Cancel the subscription for ${String(org.name)}? Their staff lose access immediately.`,
-                    )
-                  )
-                    return;
-                  const res = await expireAccessAction({
-                    organizationId: orgId,
-                    mode: "canceled",
-                  });
-                  throwIfError(res, "Failed");
-                  await flashOk("Subscription canceled");
-                  await onReload();
-                }}
-              >
-                Cancel
-              </ActionButton>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-4 space-y-2 rounded-2xl border border-gold/30 bg-gold/10 p-3">
-          <p className="text-xs font-semibold text-ink/70">
-            Follow-up reminder (check on them)
-          </p>
-          <p className="text-[11px] text-ink/50">
-            Shows on Overview when due. Also applied when you start/extend/grant
-            if set here.
-          </p>
-          <label className="block text-xs text-ink/55">
-            Remind me at
-            <input
-              type="datetime-local"
-              className="field mt-1"
-              value={followUpLocal}
-              onChange={(e) => setFollowUpLocal(e.target.value)}
-            />
-          </label>
-          <input
-            className="field"
-            placeholder="What to check (call, payment, training…)"
-            value={followUpNote}
-            onChange={(e) => setFollowUpNote(e.target.value)}
-          />
-          <div className="flex flex-wrap gap-2">
-            <ActionButton
-              disabled={!followUpLocal}
-              pendingLabel="Saving…"
-              className="rounded-xl bg-ink px-3 py-2 text-xs font-semibold text-stone"
-              onAction={async () => {
-                const at = fromDatetimeLocalValue(followUpLocal);
-                if (!at) throw new Error("Pick a follow-up date/time");
-                const res = await setFollowUpAction({
-                  organizationId: orgId,
-                  followUpAt: at,
-                  followUpNote: followUpNote || null,
-                });
-                throwIfError(res, "Failed");
-                await flashOk("Follow-up saved");
-                await onReload();
-              }}
-            >
-              Save follow-up
-            </ActionButton>
-            <ActionButton
-              pendingLabel="Clearing…"
-              className="rounded-xl border border-ink/15 px-3 py-2 text-xs font-semibold"
-              onAction={async () => {
-                const res = await setFollowUpAction({
-                  organizationId: orgId,
-                  followUpAt: null,
-                });
-                throwIfError(res, "Failed");
-                setFollowUpLocal("");
-                setFollowUpNote("");
-                await flashOk("Follow-up cleared");
-                await onReload();
-              }}
-            >
-              Clear / done
-            </ActionButton>
-          </div>
-        </div>
-
-        <AsyncForm
-          key={String(sub?.updated_at || "")}
-          className="mt-4 space-y-3 rounded-2xl border border-ink/8 p-3"
-          onSubmitAsync={async (fd) => {
-            const res = await updateTenantSubscriptionAction({
-              organizationId: orgId,
-              status: String(fd.get("status")) as SubStatus,
-              menuEnabled: mods.menu,
-              orderingEnabled: mods.ordering,
-              kitchenEnabled: mods.kitchen,
-              inventoryEnabled: mods.inventory,
-              financeEnabled: mods.finance,
-              hrEnabled: mods.hr,
-              onlineEnabled: mods.online,
-              extraStaffSeats: extraSeats,
-              trialDays: Number(fd.get("trialDays") || 14),
-              periodMonths: Number(fd.get("periodMonths") || 0),
-              notes: String(fd.get("notes") || ""),
-            });
-            throwIfError(res, "Update failed");
-            await flashOk("Subscription updated");
-            await onReload();
-          }}
-        >
-          <p className="text-xs font-semibold text-ink/60">Edit subscription</p>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <select
-              name="status"
-              className="field"
-              defaultValue={String(sub?.status || "expired")}
-            >
-              <option value="trialing">trialing</option>
-              <option value="active">active</option>
-              <option value="past_due">past_due</option>
-              <option value="expired">expired</option>
-              <option value="canceled">canceled</option>
-            </select>
-            <input
-              name="trialDays"
-              type="number"
-              className="field"
-              defaultValue={14}
-              placeholder="Trial days"
-            />
-            <select name="periodMonths" className="field" defaultValue="0">
-              <option value="0">Don’t extend</option>
-              <option value="1">+1 month</option>
-              <option value="3">+3 months</option>
-              <option value="6">+6 months</option>
-              <option value="12">+12 months</option>
-            </select>
-            <input
-              name="extraStaffSeats"
-              type="number"
-              min={0}
-              className="field"
-              value={extraSeats}
-              onChange={(e) =>
-                setExtraSeats(Math.max(0, Number(e.target.value) || 0))
-              }
-              title="Extra staff seats"
-            />
-          </div>
-          <ModuleCheckboxes value={mods} onChange={setMods} />
-          <input
-            name="notes"
-            className="field"
-            defaultValue={String(sub?.notes || "")}
-            placeholder="Notes"
-          />
-          <SubmitButton
-            pendingLabel="Saving…"
-            className="rounded-xl bg-ink px-4 py-2 text-xs font-semibold text-stone"
-          >
-            Save subscription
-          </SubmitButton>
-        </AsyncForm>
-
-        <div className="mt-3 flex gap-2">
-          <input
-            className="field flex-1"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Add admin note"
-          />
-          <ActionButton
-            disabled={!note.trim()}
-            pendingLabel="Adding…"
-            className="rounded-xl border border-ink/15 px-3 py-2 text-xs font-semibold"
-            onAction={async () => {
-              const res = await addAdminNoteAction({
-                organizationId: orgId,
-                note,
-              });
-              throwIfError(res, "Failed");
-              setNote("");
-              await flashOk("Note added");
-              await onReload();
-            }}
-          >
-            Add note
-          </ActionButton>
-        </div>
-      </section>
 
       <PaymentRecords
         organizationId={orgId}

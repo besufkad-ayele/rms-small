@@ -214,6 +214,7 @@ export function KitchenBoard() {
     };
   }, [orgId, reload]);
 
+  const [menuReady, setMenuReady] = useState(false);
   const [menuInfo, setMenuInfo] = useState<Map<string, MenuKitchenInfo>>(
     () => new Map(),
   );
@@ -238,10 +239,11 @@ export function KitchenBoard() {
         });
       }
       setMenuInfo(next);
+      setMenuReady(true);
     };
     void loadMenuResilient(orgId, apply)
       .then(apply)
-      .catch(() => undefined);
+      .catch(() => setMenuReady(true));
   }, [orgId]);
 
   useEffect(() => {
@@ -364,22 +366,28 @@ export function KitchenBoard() {
         </p>
       ) : null}
 
-      <StationBoard
-        station="barista"
-        title="Barista"
-        blurb="Tea, coffee, and other drinks."
-        tickets={baristaTickets}
-        busyId={busyId}
-        onMove={(key, status) => void moveTo(key, status)}
-      />
-      <StationBoard
-        station="kitchen"
-        title="Kitchen"
-        blurb="Plates and other food."
-        tickets={kitchenTickets}
-        busyId={busyId}
-        onMove={(key, status) => void moveTo(key, status)}
-      />
+      {menuReady ? (
+        <>
+          <StationBoard
+            station="barista"
+            title="Barista"
+            blurb="Tea, coffee, and other drinks."
+            tickets={baristaTickets}
+            busyId={busyId}
+            onMove={(key, status) => void moveTo(key, status)}
+          />
+          <StationBoard
+            station="kitchen"
+            title="Kitchen"
+            blurb="Plates and other food."
+            tickets={kitchenTickets}
+            busyId={busyId}
+            onMove={(key, status) => void moveTo(key, status)}
+          />
+        </>
+      ) : (
+        <p className="text-sm text-ink/50">Loading barista and kitchen…</p>
+      )}
     </div>
     </MenuKitchenContext.Provider>
   );

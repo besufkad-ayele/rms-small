@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { FieldLabel } from "@/components/ui/FieldLabel";
 import {
   listOrgStaffDirectoryAction,
   type StaffDirectoryPerson,
@@ -111,7 +112,7 @@ export function InventoryIssue() {
           </p>
         </div>
         <label className="block text-sm sm:col-span-2">
-          <span className="mb-1 block text-ink/60">Item *</span>
+          <FieldLabel required>Item</FieldLabel>
           <select
             required
             className="field"
@@ -128,7 +129,7 @@ export function InventoryIssue() {
           </select>
         </label>
         <label className="block text-sm">
-          <span className="mb-1 block text-ink/60">Quantity *</span>
+          <FieldLabel required>Quantity</FieldLabel>
           <input
             required
             type="number"
@@ -140,7 +141,7 @@ export function InventoryIssue() {
           />
         </label>
         <label className="block text-sm">
-          <span className="mb-1 block text-ink/60">Purpose *</span>
+          <FieldLabel required>Purpose</FieldLabel>
           <input
             required
             className="field"
@@ -150,7 +151,7 @@ export function InventoryIssue() {
           />
         </label>
         <label className="block text-sm">
-          <span className="mb-1 block text-ink/60">Who takes out *</span>
+          <FieldLabel required>Who takes out</FieldLabel>
           <select
             required
             className="field"
@@ -166,7 +167,7 @@ export function InventoryIssue() {
           </select>
         </label>
         <label className="block text-sm">
-          <span className="mb-1 block text-ink/60">For whom *</span>
+          <FieldLabel required>For whom</FieldLabel>
           <select
             required
             className="field"

@@ -15,6 +15,7 @@ import {
   ShoppingCart,
   Users,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -24,7 +25,34 @@ import { InstallAppButton } from "@/components/offline/InstallAppButton";
 import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import { SyncControls, SyncSuccessDialog } from "@/components/offline/SyncUI";
 import { isOwner } from "@/lib/permissions";
+import type { MemberRole } from "@/lib/tenant";
 import { cn } from "@/lib/utils";
+
+type ShellNavItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  exact?: boolean;
+};
+
+/** Daily work for owners and managers. Everything else stays in the sidebar. */
+const MANAGER_MOBILE_HREFS = [
+  "/app/order",
+  "/app/kitchen",
+  "/app/inventory",
+  "/app/reports",
+] as const;
+
+function mobileNavForRole(role: MemberRole | undefined, nav: ShellNavItem[]) {
+  const inApp = nav.filter((item) => item.href.startsWith("/app"));
+  if (role === "owner" || role === "manager") {
+    const core = inApp.filter((item) =>
+      (MANAGER_MOBILE_HREFS as readonly string[]).includes(item.href),
+    );
+    return core.length > 0 ? core : inApp;
+  }
+  return inApp;
+}
 
 export function AppShell({
   children,
@@ -74,7 +102,7 @@ export function AppShell({
                     ? t("nav.staff")
                     : t("nav.home");
 
-  const nav = [
+  const nav: ShellNavItem[] = [
     { href: "/app", label: t("nav.home"), icon: LayoutGrid, exact: true },
     ...(hasFeature("order")
       ? [{ href: "/app/order", label: t("nav.order"), icon: ShoppingCart }]
@@ -112,6 +140,9 @@ export function AppShell({
       ? [{ href: "/platform", label: t("nav.platform"), icon: LayoutGrid }]
       : []),
   ];
+
+  const mobileNav = mobileNavForRole(tenant?.membership.role, nav);
+  const mobileScroll = mobileNav.length > 5;
 
   async function handleLogout() {
     await logout();
@@ -346,10 +377,69 @@ export function AppShell({
         <main
           id="main-content"
           tabIndex={-1}
-          className="w-full flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-8"
+          className={cn(
+            "w-full flex-1 px-4 pt-5 sm:px-6 sm:pt-6 lg:px-8",
+            mobileNav.length > 0
+              ? "pb-[calc(5.25rem+env(safe-area-inset-bottom))] lg:pb-6"
+              : "pb-5 sm:pb-6",
+          )}
         >
           {children}
         </main>
+
+        {mobileNav.length > 0 ? (
+          <nav
+            className="fixed inset-x-0 bottom-0 z-20 border-t border-ink/8 bg-paper/95 px-1 pt-1 shadow-[0_-10px_28px_-18px_rgba(11,29,26,0.45)] backdrop-blur-md lg:hidden safe-pb"
+            aria-label={t("nav.main")}
+          >
+            <div
+              className={cn(
+                mobileScroll
+                  ? "flex gap-0.5 overflow-x-auto"
+                  : "grid",
+              )}
+              style={
+                mobileScroll
+                  ? undefined
+                  : {
+                      gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))`,
+                    }
+              }
+            >
+              {mobileNav.map((item) => {
+                const active = item.exact
+                  ? pathname === item.href
+                  : pathname.startsWith(item.href);
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={active ? "page" : undefined}
+                    onClick={() => setOpen(false)}
+                    className={cn(
+                      "flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-[10px] font-semibold leading-tight",
+                      mobileScroll && "min-w-[4.5rem] shrink-0",
+                      active ? "text-teal" : "text-ink/55",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "flex h-7 w-7 items-center justify-center rounded-lg",
+                        active ? "bg-teal/15 text-teal" : "text-ink/50",
+                      )}
+                    >
+                      <Icon className="h-[18px] w-[18px]" aria-hidden />
+                    </span>
+                    <span className="max-w-full truncate px-0.5">
+                      {item.label}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          </nav>
+        ) : null}
       </div>
     </div>
   );

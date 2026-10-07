@@ -17,7 +17,7 @@ export function LocaleToggle({
       role="radiogroup"
       aria-label={t("settings.language")}
       className={cn(
-        "inline-flex rounded-full border p-0.5",
+        "inline-flex max-w-full flex-wrap justify-center gap-1 rounded-2xl border p-1",
         dark ? "border-white/20" : "border-ink/15",
       )}
     >
@@ -31,7 +31,7 @@ export function LocaleToggle({
             aria-checked={active}
             onClick={() => setLocale(opt.id)}
             className={cn(
-              "rounded-full px-3 py-1 text-xs font-medium transition",
+              "rounded-full px-2.5 py-1 text-xs font-medium transition",
               active
                 ? dark
                   ? "bg-white/15 text-white"

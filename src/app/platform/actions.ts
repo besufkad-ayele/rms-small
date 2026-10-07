@@ -2,6 +2,7 @@
 
 import {
   calculateAmount,
+  includedSeatsFromFlags,
   packageDbFlags,
   seatColumns,
   type AmountBreakdown,
@@ -633,6 +634,8 @@ export async function updateTenantSubscriptionAction(input: {
   periodMonths?: number;
   extraStaffSeats?: number;
   notes?: string;
+  /** Leave trial and paid end dates as they are. */
+  keepDates?: boolean;
 }) {
   const gate = await requirePlatformAdmin();
   if ("error" in gate) return { error: gate.error ?? "Unauthorized" };
@@ -670,13 +673,13 @@ export async function updateTenantSubscriptionAction(input: {
       .eq("id", input.organizationId);
   }
 
-  if (input.status === "trialing") {
+  if (input.status === "trialing" && !input.keepDates) {
     const trialEnds = new Date();
     trialEnds.setDate(trialEnds.getDate() + (input.trialDays ?? TRIAL_DAYS));
     patch.trial_ends_at = trialEnds.toISOString();
   }
 
-  const monthsToAdd = input.periodMonths ?? 0;
+  const monthsToAdd = input.keepDates ? 0 : (input.periodMonths ?? 0);
   if (input.status === "active" && monthsToAdd > 0) {
     const { data: sub } = await admin
       .from("subscriptions")
@@ -708,6 +711,114 @@ export async function updateTenantSubscriptionAction(input: {
     Boolean(flags.online_enabled),
   );
   return { ok: true as const };
+}
+
+/** Raise or set the staff-seat cap without changing features, trial, or paid dates. */
+export async function updateStaffSeatsAction(input: {
+  organizationId: string;
+  maxStaffSeats: number;
+}) {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { error: gate.error ?? "Unauthorized" };
+  const { admin } = gate;
+
+  const { data: sub } = await admin
+    .from("subscriptions")
+    .select("*")
+    .eq("organization_id", input.organizationId)
+    .maybeSingle();
+  if (!sub) return { error: "Subscription not found" };
+
+  const flags = resolveModuleFlags({}, sub);
+  const included = includedSeatsFromFlags(toggleMapFromDb(flags));
+  const total = Math.floor(Number(input.maxStaffSeats));
+  if (!Number.isFinite(total) || total < 0) {
+    return { error: "Enter a valid seat count" };
+  }
+  if (total < included) {
+    return {
+      error: `This place has ${included} seat${included === 1 ? "" : "s"} included with its features. Set the total to at least ${included}.`,
+    };
+  }
+
+  const seats = seatPatch(flags, total - included);
+  const { error } = await admin
+    .from("subscriptions")
+    .update({
+      ...seats,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("organization_id", input.organizationId);
+  if (error) return { error: error.message };
+  return {
+    ok: true as const,
+    maxStaffSeats: seats.max_staff_seats,
+    extraStaffSeats: seats.extra_staff_seats,
+    includedSeats: included,
+  };
+}
+
+/** Save which modules this café has, without moving trial or paid end dates. */
+export async function updateTenantFeaturesAction(input: {
+  organizationId: string;
+  menuEnabled: boolean;
+  orderingEnabled: boolean;
+  kitchenEnabled: boolean;
+  inventoryEnabled: boolean;
+  financeEnabled: boolean;
+  hrEnabled: boolean;
+  onlineEnabled?: boolean;
+  packageCode?: string | null;
+}) {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { error: gate.error ?? "Unauthorized" };
+  const { admin } = gate;
+
+  const { data: sub } = await admin
+    .from("subscriptions")
+    .select("*")
+    .eq("organization_id", input.organizationId)
+    .maybeSingle();
+  if (!sub) return { error: "Subscription not found" };
+
+  let flags = resolveModuleFlags(input, sub);
+  let planCode = String(sub.plan_code || "custom");
+  const packageCode = input.packageCode?.trim() || null;
+  if (packageCode) {
+    const { data: pkg } = await admin
+      .from("subscription_packages")
+      .select("*")
+      .eq("code", packageCode)
+      .maybeSingle();
+    if (pkg) {
+      flags = packageDbFlags(pkg as PackageRow);
+      planCode = String(pkg.code);
+    }
+  }
+
+  const extra = Number(sub.extra_staff_seats ?? 0);
+  const seats = seatPatch(flags, extra);
+  const { error } = await admin
+    .from("subscriptions")
+    .update({
+      ...flags,
+      ...seats,
+      plan_code: packageCode ? planCode : String(sub.plan_code || "custom"),
+      package_code: packageCode,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("organization_id", input.organizationId);
+  if (error) return { error: error.message };
+
+  await ensureOnlineSlug(
+    admin,
+    input.organizationId,
+    Boolean(flags.online_enabled),
+  );
+  return {
+    ok: true as const,
+    maxStaffSeats: seats.max_staff_seats,
+  };
 }
 
 export async function getKycSignedUrlAction(path: string) {

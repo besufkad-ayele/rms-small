@@ -529,7 +529,6 @@ export async function seedOrgCatalog(orgId: string) {
       .from("menu_items")
       .update({ tags: [kind] })
       .eq("id", item.id);
-    item.tags = [kind];
   }
 
   const espresso = (menu || []).find((m) => m.name === "Espresso");

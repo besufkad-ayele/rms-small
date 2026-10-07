@@ -124,6 +124,10 @@ export async function receiveInventory(input: {
   note?: string;
 }) {
   if (input.quantity <= 0) throw new Error("Quantity must be positive.");
+  if (!input.supplierId) throw new Error("Select a supplier.");
+  if (!input.purchasedAt) throw new Error("Buy date is required.");
+  if (!input.expiresAt) throw new Error("Expiry date is required.");
+  const note = optionalText(input.note || "", 300);
   const supabase = createClient();
   const { data: inv, error: invErr } = await supabase
     .from("inventory_items")
@@ -153,7 +157,7 @@ export async function receiveInventory(input: {
     expires_at: input.expiresAt,
     cost_per_unit: cost,
     payment_status: paymentStatus,
-    note: input.note?.trim() || "",
+    note,
   });
   if (moveErr) throw new Error(moveErr.message);
 
@@ -187,6 +191,8 @@ export async function issueInventory(input: {
   note?: string;
 }) {
   if (input.quantity <= 0) throw new Error("Quantity must be positive.");
+  const detail = requireText("Purpose", input.detail || "", 200);
+  const note = optionalText(input.note || "", 200);
   const supabase = createClient();
   const { data: inv, error: invErr } = await supabase
     .from("inventory_items")
@@ -211,8 +217,8 @@ export async function issueInventory(input: {
     issued_by_user_id: input.issuedByUserId,
     issued_by_name: input.issuedByName,
     issued_at: now,
-    detail: input.detail?.trim() || "",
-    note: input.note?.trim() || "",
+    detail,
+    note,
   });
   if (moveErr) throw new Error(moveErr.message);
 
