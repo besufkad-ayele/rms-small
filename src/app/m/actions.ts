@@ -3,9 +3,29 @@
 import { requirePlatformAdmin } from "@/lib/platform-admin";
 import { createAdminClient } from "@/lib/supabase/server";
 import { computeBill } from "@/lib/money";
+import { allowRequest, publicOrderKey } from "@/lib/rate-limit";
 import { dayKey } from "@/lib/utils";
 import { ensureOrgPublicSlug } from "@/lib/org-slug";
 import { moduleEnabled, type AppModule } from "@/lib/tenant";
+
+const PUBLIC_ORDER_WINDOW_MS = 10 * 60 * 1000;
+const PUBLIC_ORDER_PER_PHONE = 8;
+const PUBLIC_ORDER_PER_SLUG = 30;
+
+function isCompleteSaleUnavailable(message: string) {
+  const m = message.toLowerCase();
+  return (
+    m.includes("complete_sale") ||
+    m.includes("42883") ||
+    m.includes("could not find the function")
+  );
+}
+
+function receiptFromSaleRpc(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  const receipt = (data as { receipt_number?: unknown }).receipt_number;
+  return typeof receipt === "string" && receipt ? receipt : null;
+}
 
 export type PublicMenuItem = {
   id: string;
@@ -88,6 +108,21 @@ export async function placePublicOrderAction(input: {
   }
   if (!input.lines.length) return { error: "Your bag is empty" };
 
+  if (
+    !allowRequest(
+      publicOrderKey(input.slug, phone),
+      PUBLIC_ORDER_PER_PHONE,
+      PUBLIC_ORDER_WINDOW_MS,
+    ) ||
+    !allowRequest(
+      `public-order:${input.slug}`,
+      PUBLIC_ORDER_PER_SLUG,
+      PUBLIC_ORDER_WINDOW_MS,
+    )
+  ) {
+    return { error: "Too many orders. Please wait a few minutes." };
+  }
+
   const loaded = await loadPublicVenueAction(input.slug);
   if ("error" in loaded) return loaded;
   const byId = new Map(loaded.items.map((i) => [i.id, i]));
@@ -111,6 +146,34 @@ export async function placePublicOrderAction(input: {
 
   const subtotal = lines.reduce((s, l) => s + l.line_total, 0);
   const admin = createAdminClient();
+  const note = input.guestNote?.trim() || null;
+  const { data: rpcData, error: rpcError } = await admin.rpc("complete_sale", {
+    p_org_id: loaded.venue.id,
+    p_client_order_id: `online_${crypto.randomUUID()}`,
+    p_lines: lines.map((l) => ({
+      menu_item_id: l.menu_item_id,
+      quantity: l.quantity,
+      name: l.name,
+      unit_price: l.unit_price,
+    })),
+    p_cashier_name: name,
+    p_payment_method: "other",
+    p_place_label: "Online",
+    p_mark_paid: false,
+    p_source: "online",
+    p_guest_name: name,
+    p_guest_phone: phone,
+    p_guest_note: note,
+  });
+  if (!rpcError) {
+    const receiptNumber = receiptFromSaleRpc(rpcData);
+    if (receiptNumber) return { ok: true, receipt: receiptNumber };
+    return { error: "Could not place order" };
+  }
+  if (!isCompleteSaleUnavailable(`${rpcError.message || ""} ${rpcError.code || ""}`)) {
+    return { error: rpcError.message || "Could not place order" };
+  }
+
   const { data: meta } = await admin
     .from("org_meta")
     .select("receipt_seq, vat_percent, service_percent")
@@ -147,7 +210,7 @@ export async function placePublicOrderAction(input: {
       source: "online",
       guest_name: name,
       guest_phone: phone,
-      guest_note: input.guestNote?.trim() || null,
+          guest_note: note,
       place_label: "Online",
       vat_percent: bill.vatPercent,
       service_percent: bill.servicePercent,

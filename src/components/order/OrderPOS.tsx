@@ -16,6 +16,7 @@ import {
   loadMenuResilient,
 } from "@/lib/offline/resilient";
 import { canCashierOrderOps } from "@/lib/permissions";
+import { subscribeOrgOrderChanges } from "@/lib/realtime-orders";
 import type { MenuCategory } from "@/lib/tenant";
 import { MENU_CATEGORIES } from "@/lib/menu-categories";
 import { parseMenuDescription } from "@/lib/menu-details";
@@ -69,6 +70,7 @@ export function OrderPOS({
 
   const openInFlight = useRef(false);
   useEffect(() => {
+    if (!orgId) return;
     let stopped = false;
     const tick = () => {
       if (stopped || openInFlight.current) return;
@@ -77,13 +79,12 @@ export function OrderPOS({
         openInFlight.current = false;
       });
     };
-    tick();
-    const t = window.setInterval(tick, 1_000);
+    const unsub = subscribeOrgOrderChanges(orgId, tick);
     return () => {
       stopped = true;
-      window.clearInterval(t);
+      unsub();
     };
-  }, [reloadOpen]);
+  }, [orgId, reloadOpen]);
 
   useEffect(() => {
     setCart([]);

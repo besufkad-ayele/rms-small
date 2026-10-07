@@ -36,6 +36,7 @@ import {
 import { getConnectionSnapshot } from "./connection";
 import { recordSaleLocally } from "./local-sale";
 import { enqueueSyncAction } from "./queue";
+import { ensureClientOrderId } from "./sale-identity";
 import type { CompleteSalePayload, SaleLineInput } from "./types";
 import { prefetchReceiptSettings } from "@/lib/org-tax";
 
@@ -249,7 +250,9 @@ export async function completeSaleResilient(input: {
   placeLabel?: string;
   kitchenNote?: string;
   markPaid?: boolean;
+  localOrder?: CloudSaleOrder;
 }): Promise<{ order: CloudSaleOrder; offlineQueued: boolean }> {
+  const clientOrderId = ensureClientOrderId(input.localOrder?.id);
   const payload: CompleteSalePayload = {
     orgId: input.orgId,
     lines: input.lines,
@@ -260,11 +263,12 @@ export async function completeSaleResilient(input: {
     placeLabel: input.placeLabel,
     kitchenNote: input.kitchenNote,
     markPaid: Boolean(input.markPaid),
+    localOrder: input.localOrder,
   };
 
   if (shouldPreferCloud()) {
     try {
-      const order = await completeCloudSale(input);
+      const order = await completeCloudSale({ ...input, clientOrderId });
       void pullMenuChanges(input.orgId).catch(() => undefined);
       void pullInventoryChanges(input.orgId).catch(() => undefined);
       return { order, offlineQueued: false };
@@ -273,7 +277,13 @@ export async function completeSaleResilient(input: {
     }
   }
 
-  const localOrder = await recordSaleLocally(payload);
+  const localOrder = await recordSaleLocally({
+    ...payload,
+    localOrder: {
+      ...(payload.localOrder || {}),
+      id: clientOrderId,
+    } as CloudSaleOrder,
+  });
   await enqueueSyncAction(input.orgId, "COMPLETE_SALE", {
     ...payload,
     localOrder,

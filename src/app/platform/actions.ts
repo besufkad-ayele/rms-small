@@ -740,25 +740,19 @@ export async function resetSubscriberPasswordAction(organizationId: string) {
   );
   if (error) return { error: error.message };
 
-  const { error: storeErr } = await admin
+  await admin
     .from("organizations")
     .update({
-      platform_login_password: password,
+      platform_login_password: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", organizationId);
-
-  await admin
-    .from("applications")
-    .update({ generated_password: password, updated_at: new Date().toISOString() })
-    .eq("organization_id", organizationId);
 
   return {
     ok: true as const,
     email: authUser.user.email,
     password,
-    /** False when the platform_login_password migration is not applied. */
-    stored: !storeErr,
+    stored: false as const,
   };
 }
 
@@ -1397,7 +1391,7 @@ export async function startTrialAction(input: {
       await admin
         .from("organizations")
         .update({
-          platform_login_password: password,
+          platform_login_password: null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", input.organizationId);
@@ -1409,6 +1403,7 @@ export async function startTrialAction(input: {
     trialEndsAt: trialEnds.toISOString(),
     email,
     password,
+    stored: false as const,
   };
 }
 

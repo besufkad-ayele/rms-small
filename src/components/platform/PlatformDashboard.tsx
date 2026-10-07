@@ -52,7 +52,9 @@ import {
   type PlatformSection,
 } from "./platform-ui";
 import { SectionShimmer } from "@/components/ui/Shimmer";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { OwnerAlertsCard, usePlatformAlerts } from "./PlatformAlerts";
+import { PlatformProfile, profileInitials } from "./PlatformProfile";
 
 const NAV: Array<{
   id: PlatformSection;
@@ -99,6 +101,10 @@ function DashboardInner({
   setBusy: (v: boolean) => void;
 }) {
   const toast = useToast();
+  const { profile, user } = useAuth();
+  const adminName = profile?.full_name?.trim() || "Platform admin";
+  const adminEmail = profile?.email || user?.email || "";
+  const initials = profileInitials(adminName);
   const setError = useCallback(
     (v: string | null) => {
       if (v) toast.error(v);
@@ -252,7 +258,7 @@ function DashboardInner({
 
   useEffect(() => {
     const tab = new URLSearchParams(window.location.search).get("tab");
-    if (NAV.some((n) => n.id === tab)) {
+    if (tab === "profile" || NAV.some((n) => n.id === tab)) {
       setSection(tab as PlatformSection);
     }
   }, []);
@@ -400,6 +406,13 @@ function DashboardInner({
     );
   }, [tenants, filter]);
 
+  const sectionLabel =
+    section === "detail"
+      ? String(selectedTenant?.organization.name || "Restaurant")
+      : section === "profile"
+        ? "Profile"
+        : NAV.find((n) => n.id === section)?.label;
+
   function openSubscribers(view: Partial<SubscriberView>) {
     setSubscriberView({ ...DEFAULT_SUBSCRIBER_VIEW, ...view });
     go("subscribers");
@@ -429,6 +442,40 @@ function DashboardInner({
           <p className="mt-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">
             Platform owner
           </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => go("profile")}
+          className={cn(
+            "mb-3 flex items-center gap-2.5 rounded-xl px-2 py-2 text-left transition",
+            section === "profile"
+              ? "bg-[#2a9d8f] text-white"
+              : "text-white/80 hover:bg-white/8 hover:text-white",
+          )}
+        >
+          <span
+            className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-semibold",
+              section === "profile"
+                ? "bg-white/20 text-white"
+                : "bg-white/10 text-white",
+            )}
+          >
+            {initials}
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold">
+              {adminName}
+            </span>
+            <span
+              className={cn(
+                "block truncate text-[11px]",
+                section === "profile" ? "text-white/80" : "text-white/45",
+              )}
+            >
+              {adminEmail || "Manage profile"}
+            </span>
+          </span>
         </button>
         <nav className="flex flex-1 flex-col gap-1">
           {NAV.map((item) => {
@@ -489,6 +536,41 @@ function DashboardInner({
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 border-b border-ink/8 bg-stone/90 px-3 py-2.5 backdrop-blur safe-pt sm:px-5 lg:py-3">
+          <button
+            type="button"
+            onClick={() => go("profile")}
+            className={cn(
+              "mb-2 flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left lg:hidden",
+              section === "profile"
+                ? "bg-teal text-white"
+                : "border border-ink/10 bg-white text-ink",
+            )}
+            aria-label="Your profile"
+          >
+            <span
+              className={cn(
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-semibold",
+                section === "profile"
+                  ? "bg-white/20 text-white"
+                  : "bg-teal/15 text-teal",
+              )}
+            >
+              {initials}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold">
+                {adminName}
+              </span>
+              <span
+                className={cn(
+                  "block truncate text-[11px]",
+                  section === "profile" ? "text-white/80" : "text-ink/50",
+                )}
+              >
+                {adminEmail || "Manage profile"}
+              </span>
+            </span>
+          </button>
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0 lg:hidden">
               <button
@@ -503,19 +585,13 @@ function DashboardInner({
                     Owner
                   </p>
                   <p className="truncate font-display text-base leading-tight">
-                    {section === "detail"
-                      ? String(selectedTenant?.organization.name || "Restaurant")
-                      : NAV.find((n) => n.id === section)?.label}
+                    {sectionLabel}
                   </p>
                 </div>
               </button>
             </div>
             <div className="hidden lg:block">
-              <h1 className="font-display text-xl text-ink">
-                {section === "detail"
-                  ? String(selectedTenant?.organization.name || "Restaurant")
-                  : NAV.find((n) => n.id === section)?.label}
-              </h1>
+              <h1 className="font-display text-xl text-ink">{sectionLabel}</h1>
             </div>
             <div className="flex items-center gap-2">
               <ActionButton
@@ -584,6 +660,10 @@ function DashboardInner({
                 </button>
               </div>
             </div>
+          ) : null}
+
+          {section === "profile" ? (
+            <PlatformProfile onSignOut={onSignOut} />
           ) : null}
 
           {section === "overview" && loading && !stats ? (

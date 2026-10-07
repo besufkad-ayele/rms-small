@@ -66,7 +66,6 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
       if (syncingRef.current) return null;
       const snap = getConnectionSnapshot();
       if (snap.status === "down") return null;
-      if (source === "auto" && !snap.fastEnough) return null;
 
       syncingRef.current = true;
       setIsSyncing(true);
@@ -106,9 +105,9 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
       const wasDown = wasDownRef.current;
       wasDownRef.current = snap.status === "down";
 
-      if (wasDown && snap.fastEnough) {
+      if (wasDown && snap.status !== "down") {
         void syncNow("auto");
-      } else if (snap.fastEnough && !wasDown) {
+      } else if (snap.status !== "down" && !wasDown) {
         void (async () => {
           const count = await countPendingSync(orgId);
           if (count > 0) void syncNow("auto");

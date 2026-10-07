@@ -31,7 +31,8 @@ export type PlatformSection =
   | "onboarding"
   | "payments"
   | "subscribers"
-  | "detail";
+  | "detail"
+  | "profile";
 
 export function flagsFromSub(
   sub: Record<string, unknown> | null | undefined,

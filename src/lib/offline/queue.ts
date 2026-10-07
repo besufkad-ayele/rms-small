@@ -32,7 +32,22 @@ export async function listSyncQueue(orgId?: string): Promise<SyncQueueItem[]> {
 
 export async function countPendingSync(orgId?: string): Promise<number> {
   const items = await listSyncQueue(orgId);
-  return items.filter((i) => i.status !== "syncing").length;
+  return items.filter((i) => i.status === "pending" || i.status === "failed")
+    .length;
+}
+
+export async function resetStuckSyncing(orgId?: string): Promise<void> {
+  const items = await listSyncQueue(orgId);
+  await Promise.all(
+    items
+      .filter((item) => item.status === "syncing")
+      .map((item) =>
+        db.syncQueue.put({
+          ...item,
+          status: "pending",
+        }),
+      ),
+  );
 }
 
 export async function updateSyncQueueItem(

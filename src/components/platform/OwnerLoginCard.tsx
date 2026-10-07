@@ -9,9 +9,6 @@ import { setOwnerPasswordAction } from "@/app/platform/manage-actions";
 import { daysSince, relativeDays } from "@/lib/platform-metrics";
 import { ActionButton, throwIfError } from "./feedback";
 
-const NOT_STORED =
-  "Password changed, but it could not be saved for later viewing. Copy it now, then apply migration 20260926_platform_login_password.sql.";
-
 export function OwnerLoginCard({
   row,
   flashOk,
@@ -28,12 +25,9 @@ export function OwnerLoginCard({
   const [show, setShow] = useState(false);
   const [custom, setCustom] = useState("");
   const [showCustom, setShowCustom] = useState(false);
-  const [warning, setWarning] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
-  const password =
-    issued ??
-    (org.platform_login_password ? String(org.platform_login_password) : "");
+  const password = issued ?? "";
   const signIn = daysSince(row.ownerLastSignInAt);
   const loginUrl =
     typeof window !== "undefined" ? `${window.location.origin}/login` : "/login";
@@ -86,7 +80,8 @@ export function OwnerLoginCard({
           ) : (
             <p className="mt-0.5 text-xs text-ink/55">
               Hidden — the owner still uses the password they chose at
-              signup. Generate one below if they need a new password.
+              signup. Generate or set one below if they need a new password.
+              It is shown once and is not stored.
             </p>
           )}
           <div className="mt-2 flex flex-wrap gap-2">
@@ -122,7 +117,12 @@ export function OwnerLoginCard({
               </>
             ) : null}
           </div>
-          {warning ? <p className="mt-2 text-[11px] text-coral">{warning}</p> : null}
+          {password ? (
+            <p className="mt-2 text-[11px] text-ink/55">
+              Copy this password now — it is shown once after reset and will
+              not be saved.
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -141,9 +141,10 @@ export function OwnerLoginCard({
             if ("password" in res) {
               setIssued(res.password ?? null);
               setShow(true);
-              setWarning(res.stored ? null : NOT_STORED);
             }
-            await flashOk("New password issued — copy it and send it to the owner.");
+            await flashOk(
+              "New password issued — copy it now; it will not be saved.",
+            );
           }}
           className="rounded-xl bg-teal px-3 py-2 text-xs font-semibold text-white"
         >
@@ -192,9 +193,8 @@ export function OwnerLoginCard({
               setIssued(res.password ?? null);
               setCustom("");
               setShow(true);
-              setWarning(res.stored ? null : NOT_STORED);
             }
-            await flashOk("Password updated.");
+            await flashOk("Password updated — copy it now; it will not be saved.");
           }}
           className="rounded-xl bg-ink px-3 py-2 text-xs font-semibold text-stone"
         >

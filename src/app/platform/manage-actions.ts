@@ -256,16 +256,16 @@ export async function setOwnerPasswordAction(input: {
   );
   if (error) return { error: error.message };
 
-  const { error: storeErr } = await admin
+  await admin
     .from("organizations")
-    .update({ platform_login_password: password, updated_at: now() })
+    .update({ platform_login_password: null, updated_at: now() })
     .eq("id", input.organizationId);
 
   return {
     ok: true as const,
     email: authUser.user.email ?? null,
     password,
-    stored: !storeErr,
+    stored: false as const,
   };
 }
 

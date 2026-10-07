@@ -32,6 +32,7 @@ import {
   type OrgPaymentMethod,
 } from "@/lib/org-payment-methods";
 import { canCashierOrderOps, isOwner } from "@/lib/permissions";
+import { subscribeOrgOrderChanges } from "@/lib/realtime-orders";
 import { uploadSalePaymentProof } from "@/lib/sale-payment-proof";
 import {
   SALE_ORDER_STATUS_LABELS,
@@ -115,6 +116,7 @@ export function CashierOrderBoard({
 
   const reloadInFlight = useRef(false);
   useEffect(() => {
+    if (!orgId) return;
     let stopped = false;
     const tick = () => {
       if (stopped || reloadInFlight.current) return;
@@ -123,13 +125,12 @@ export function CashierOrderBoard({
         reloadInFlight.current = false;
       });
     };
-    tick();
-    const t = window.setInterval(tick, 1_000);
+    const unsub = subscribeOrgOrderChanges(orgId, tick);
     return () => {
       stopped = true;
-      window.clearInterval(t);
+      unsub();
     };
-  }, [reload]);
+  }, [orgId, reload]);
 
   useEffect(() => {
     if (!orders.length) {

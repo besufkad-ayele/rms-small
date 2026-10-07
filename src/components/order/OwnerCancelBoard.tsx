@@ -10,6 +10,7 @@ import {
   type CloudSaleOrder,
 } from "@/lib/cloud-sales";
 import type { CloudMenuItem } from "@/lib/cloud-catalog";
+import { subscribeOrgOrderChanges } from "@/lib/realtime-orders";
 import {
   SALE_ORDER_STATUS_LABELS,
   type SaleOrderStatus,
@@ -47,6 +48,7 @@ export function OwnerCancelBoard() {
 
   const reloadInFlight = useRef(false);
   useEffect(() => {
+    if (!orgId) return;
     let stopped = false;
     const tick = () => {
       if (stopped || reloadInFlight.current) return;
@@ -55,13 +57,12 @@ export function OwnerCancelBoard() {
         reloadInFlight.current = false;
       });
     };
-    tick();
-    const t = window.setInterval(tick, 1_000);
+    const unsub = subscribeOrgOrderChanges(orgId, tick);
     return () => {
       stopped = true;
-      window.clearInterval(t);
+      unsub();
     };
-  }, [reload]);
+  }, [orgId, reload]);
 
   const sorted = useMemo(
     () =>

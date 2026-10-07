@@ -42,6 +42,7 @@ import {
 } from "@/lib/tenant";
 import { parseMenuDescription } from "@/lib/menu-details";
 import { loadMenuResilient } from "@/lib/offline/resilient";
+import { subscribeOrgOrderChanges } from "@/lib/realtime-orders";
 import { cn, dayKey, formatMoney } from "@/lib/utils";
 
 type MenuKitchenInfo = { note: string; prepMinutes: number | null };
@@ -178,6 +179,7 @@ export function KitchenBoard() {
 
   const reloadInFlight = useRef(false);
   useEffect(() => {
+    if (!orgId) return;
     let stopped = false;
     const tick = () => {
       if (stopped || reloadInFlight.current) return;
@@ -186,13 +188,12 @@ export function KitchenBoard() {
         reloadInFlight.current = false;
       });
     };
-    tick();
-    const t = window.setInterval(tick, 1_000);
+    const unsub = subscribeOrgOrderChanges(orgId, tick);
     return () => {
       stopped = true;
-      window.clearInterval(t);
+      unsub();
     };
-  }, [reload]);
+  }, [orgId, reload]);
 
   const [menuInfo, setMenuInfo] = useState<Map<string, MenuKitchenInfo>>(
     () => new Map(),

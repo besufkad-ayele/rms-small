@@ -1,9 +1,10 @@
 import { computeBill } from "@/lib/money";
 import type { CloudSaleOrder } from "@/lib/cloud-sales";
 import { getOrgReceiptSettings } from "@/lib/org-tax";
-import { dayKey, uid } from "@/lib/utils";
+import { dayKey } from "@/lib/utils";
 import { db, getMeta } from "@/lib/db";
 import { applyLocalStockDeduction } from "./cache";
+import { ensureClientOrderId } from "./sale-identity";
 import type { CompleteSalePayload } from "./types";
 
 async function nextLocalReceipt(orgId: string): Promise<string> {
@@ -44,9 +45,11 @@ export async function recordSaleLocally(
   const receipt =
     input.localOrder?.receipt_number || (await nextLocalReceipt(input.orgId));
   const paid = Boolean(input.markPaid);
+  const id = ensureClientOrderId(input.localOrder?.id);
 
   const order: CloudSaleOrder = {
-    id: input.localOrder?.id || uid("sale"),
+    id,
+    client_order_id: id,
     organization_id: input.orgId,
     receipt_number: receipt,
     subtotal: bill.subtotal,

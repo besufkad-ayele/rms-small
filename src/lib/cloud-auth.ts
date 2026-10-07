@@ -1,5 +1,6 @@
 import type { User } from "@supabase/supabase-js";
 import { db } from "@/lib/db";
+import { signPaymentProofPath } from "@/lib/sale-payment-proof";
 import { createClient } from "@/lib/supabase/client";
 import type {
   Membership,
@@ -145,16 +146,6 @@ export async function loadTenantDetailed(): Promise<TenantLoadResult> {
       return { tenant: null, hasMembership: false, error: null };
     }
 
-    // Bootstrap platform admin from env (first matching login)
-    const adminEmail =
-      process.env.NEXT_PUBLIC_PLATFORM_ADMIN_EMAIL?.toLowerCase();
-    if (adminEmail && user.email?.toLowerCase() === adminEmail) {
-      await supabase
-        .from("profiles")
-        .update({ is_platform_admin: true, email: user.email })
-        .eq("id", user.id);
-    }
-
     const { data: profile, error: profileErr } = await supabase
       .from("profiles")
       .select("*")
@@ -289,13 +280,6 @@ export async function loadProfile(): Promise<Profile | null> {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return null;
-  const adminEmail = process.env.NEXT_PUBLIC_PLATFORM_ADMIN_EMAIL?.toLowerCase();
-  if (adminEmail && user.email?.toLowerCase() === adminEmail) {
-    await supabase
-      .from("profiles")
-      .update({ is_platform_admin: true, email: user.email })
-      .eq("id", user.id);
-  }
   const { data } = await supabase
     .from("profiles")
     .select("*")
@@ -463,14 +447,14 @@ export async function submitPaymentProof(input: {
     .upload(path, input.file, { upsert: false });
   if (uploadError) return { error: uploadError.message };
 
-  const { data: pub } = supabase.storage.from("payment-proofs").getPublicUrl(path);
+  const imageUrl = await signPaymentProofPath(path);
 
   const { error } = await supabase.from("payment_proofs").insert({
     organization_id: input.organizationId,
     amount: input.amount,
     method: input.method,
     reference: input.reference?.trim() || null,
-    image_url: pub.publicUrl,
+    image_url: imageUrl,
     status: "pending",
     submitted_by: user.id,
     months_requested: months,
@@ -505,7 +489,14 @@ export async function listOrgPaymentProofs(organizationId: string) {
     .order("created_at", { ascending: false })
     .limit(20);
   if (error) throw new Error(error.message);
-  return data || [];
+  const rows = data || [];
+  return Promise.all(
+    rows.map(async (row) => {
+      const imageUrl = row.image_url as string | null | undefined;
+      if (!imageUrl) return row;
+      return { ...row, image_url: await signPaymentProofPath(imageUrl) };
+    }),
+  );
 }
 
 export async function updateMyProfile(input: {

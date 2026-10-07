@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/client";
 import { computeBill } from "@/lib/money";
 import { getOrgReceiptSettings } from "@/lib/org-tax";
 import type { CloudMenuItem } from "@/lib/cloud-catalog";
+import { ensureClientOrderId } from "@/lib/offline/sale-identity";
 import type {
   SaleOrderStatus,
   SalePaymentStatus,
@@ -115,6 +116,7 @@ export interface CloudSaleOrder {
   guest_name?: string | null;
   guest_phone?: string | null;
   guest_note?: string | null;
+  client_order_id?: string | null;
   created_at: string;
   lines?: CloudSaleLine[];
   sale_order_lines?: CloudSaleLine[];
@@ -398,6 +400,52 @@ async function applyRecipeDelta(
   }
 }
 
+function isMissingCompleteSaleRpc(error: {
+  code?: string;
+  message?: string;
+}): boolean {
+  const code = String(error.code ?? "");
+  const message = (error.message ?? "").toLowerCase();
+  if (code === "42883" || code === "PGRST202") return true;
+  return (
+    message.includes("schema cache") ||
+    message.includes("could not find") ||
+    (message.includes("complete_sale") &&
+      (message.includes("does not exist") ||
+        message.includes("not found") ||
+        message.includes("unknown function")))
+  );
+}
+
+function rpcRow(data: unknown): Record<string, unknown> {
+  if (typeof data === "string") {
+    return JSON.parse(data) as Record<string, unknown>;
+  }
+  if (data && typeof data === "object") {
+    return data as Record<string, unknown>;
+  }
+  throw new Error("Sale failed");
+}
+
+async function fetchSaleByClientOrderId(
+  orgId: string,
+  clientOrderId: string,
+): Promise<CloudSaleOrder | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("sale_orders")
+    .select("*, sale_order_lines(*)")
+    .eq("organization_id", orgId)
+    .eq("client_order_id", clientOrderId)
+    .maybeSingle();
+  if (error) {
+    const missing = missingColumnFromError(error.message);
+    if (missing === "client_order_id") return null;
+    throw new Error(error.message);
+  }
+  return data ? mapOrder(data as Record<string, unknown>) : null;
+}
+
 export async function completeCloudSale(input: {
   orgId: string;
   lines: { menuItem: CloudMenuItem; quantity: number }[];
@@ -409,67 +457,134 @@ export async function completeCloudSale(input: {
   kitchenNote?: string;
   /** Defaults false — place order only; pay via Mark as paid. */
   markPaid?: boolean;
+  clientOrderId?: string;
+  createdAt?: string;
+  source?: "pos" | "online";
+  guestName?: string | null;
+  guestPhone?: string | null;
+  guestNote?: string | null;
+  dayKey?: string;
 }) {
   if (input.lines.length === 0) throw new Error("Cart is empty.");
+  const clientOrderId = ensureClientOrderId(input.clientOrderId);
   const supabase = createClient();
-  const orderLines = input.lines.map(({ menuItem, quantity }) => ({
+  const rpcLines = input.lines.map(({ menuItem, quantity }) => ({
+    menu_item_id: menuItem.id,
+    quantity,
+    name: menuItem.name,
+    unit_price: menuItem.price,
+  }));
+
+  const { data, error } = await supabase.rpc("complete_sale", {
+    p_org_id: input.orgId,
+    p_client_order_id: clientOrderId,
+    p_lines: rpcLines,
+    p_cashier_name: input.cashierName,
+    p_payment_method: input.paymentMethod,
+    p_payment_reference: input.paymentReference?.trim() || null,
+    p_payment_proof_url: input.paymentProofUrl?.trim() || null,
+    p_place_label: input.placeLabel?.trim() || null,
+    p_kitchen_note: input.kitchenNote?.trim() || null,
+    p_mark_paid: Boolean(input.markPaid),
+    p_source: input.source ?? "pos",
+    p_created_at: input.createdAt || null,
+    p_guest_name: input.guestName?.trim() || null,
+    p_guest_phone: input.guestPhone?.trim() || null,
+    p_guest_note: input.guestNote?.trim() || null,
+    p_day_key: input.dayKey?.trim() || null,
+  });
+  if (!error) {
+    return mapOrder(rpcRow(data));
+  }
+  if (!isMissingCompleteSaleRpc(error)) {
+    throw new Error(error.message);
+  }
+
+  const mappedLines = input.lines.map(({ menuItem, quantity }) => ({
     menu_item_id: menuItem.id,
     name: menuItem.name,
     unit_price: menuItem.price,
     quantity,
     line_total: Math.round(menuItem.price * quantity * 100) / 100,
   }));
-  const subtotal = orderLines.reduce((s, l) => s + l.line_total, 0);
+  const subtotal = mappedLines.reduce((s, l) => s + l.line_total, 0);
   const tax = await getOrgReceiptSettings(input.orgId);
   const bill = computeBill(subtotal, {
     vatPercent: tax.vat_percent,
     servicePercent: tax.service_percent,
   });
-  const now = new Date();
-  const receipt = await nextReceipt(input.orgId);
+  const now = input.createdAt ? new Date(input.createdAt) : new Date();
   const paid = Boolean(input.markPaid);
+  const createdAt = input.createdAt || now.toISOString();
 
-  const order = await insertSaleOrderRow({
-    organization_id: input.orgId,
-    receipt_number: receipt,
-    subtotal: bill.subtotal,
-    service_charge: bill.serviceCharge,
-    vat: bill.vat,
-    total: bill.total,
-    payment_method: input.paymentMethod,
-    payment_reference: input.paymentReference?.trim() || null,
-    payment_proof_url: input.paymentProofUrl?.trim() || null,
-    cashier_name: input.cashierName,
-    day_key: dayKey(now),
-    status: "placed",
-    payment_status: paid ? "paid" : "unpaid",
-    paid_at: paid ? now.toISOString() : null,
-    paid_by: paid ? input.cashierName : null,
-    place_label: input.placeLabel?.trim() || null,
-    kitchen_note: input.kitchenNote?.trim() || null,
-    vat_percent: bill.vatPercent,
-    service_percent: bill.servicePercent,
-  });
+  let order: Record<string, unknown>;
+  try {
+    order = await insertSaleOrderRow({
+      organization_id: input.orgId,
+      client_order_id: clientOrderId,
+      receipt_number: await nextReceipt(input.orgId),
+      subtotal: bill.subtotal,
+      service_charge: bill.serviceCharge,
+      vat: bill.vat,
+      total: bill.total,
+      payment_method: input.paymentMethod,
+      payment_reference: input.paymentReference?.trim() || null,
+      payment_proof_url: input.paymentProofUrl?.trim() || null,
+      cashier_name: input.cashierName,
+      day_key: input.dayKey?.trim() || dayKey(now),
+      status: "placed",
+      payment_status: paid ? "paid" : "unpaid",
+      paid_at: paid ? createdAt : null,
+      paid_by: paid ? input.cashierName : null,
+      place_label: input.placeLabel?.trim() || null,
+      kitchen_note: input.kitchenNote?.trim() || null,
+      vat_percent: bill.vatPercent,
+      service_percent: bill.servicePercent,
+      source: input.source ?? "pos",
+      guest_name: input.guestName?.trim() || null,
+      guest_phone: input.guestPhone?.trim() || null,
+      guest_note: input.guestNote?.trim() || null,
+      created_at: createdAt,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/duplicate|unique/i.test(message) || message.includes("23505")) {
+      const existing = await fetchSaleByClientOrderId(
+        input.orgId,
+        clientOrderId,
+      );
+      if (existing && orderLines(existing).length > 0) return existing;
+      if (existing) {
+        order = { ...existing };
+      } else {
+        throw new Error(message || "Sale failed");
+      }
+    } else {
+      throw new Error(message || "Sale failed");
+    }
+  }
   if (!order) throw new Error("Sale failed");
 
-  const { error: lineErr } = await supabase.from("sale_order_lines").insert(
-    orderLines.map((l) => ({ ...l, order_id: order.id as string })),
-  );
-  if (lineErr) throw new Error(lineErr.message);
+  if (orderLines(mapOrder(order)).length === 0) {
+    const { error: lineErr } = await supabase.from("sale_order_lines").insert(
+      mappedLines.map((l) => ({ ...l, order_id: order.id as string })),
+    );
+    if (lineErr) throw new Error(lineErr.message);
 
-  for (const line of input.lines) {
-    await supabase
-      .from("menu_items")
-      .update({
-        vote_count: (line.menuItem.vote_count || 0) + line.quantity,
-        updated_at: now.toISOString(),
-      })
-      .eq("id", line.menuItem.id);
+    for (const line of input.lines) {
+      await supabase
+        .from("menu_items")
+        .update({
+          vote_count: (line.menuItem.vote_count || 0) + line.quantity,
+          updated_at: now.toISOString(),
+        })
+        .eq("id", line.menuItem.id);
+    }
+
+    await applyRecipeDelta(input.lines, -1);
   }
 
-  await applyRecipeDelta(input.lines, -1);
-
-  return mapOrder({ ...order, lines: orderLines });
+  return mapOrder({ ...order, lines: mappedLines, client_order_id: clientOrderId });
 }
 
 /** Waiter photo of a transfer. Does not mark the ticket paid. */

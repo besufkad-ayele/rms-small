@@ -8,12 +8,15 @@ import {
   upsertInventory,
   upsertMenu,
 } from "@/lib/cloud-catalog";
-import { saveCloudDayClose, saveCloudXReport, insertSaleOrderRow } from "@/lib/cloud-sales";
-import { createClient } from "@/lib/supabase/client";
-import type { CloudSaleOrder } from "@/lib/cloud-sales";
+import {
+  completeCloudSale,
+  saveCloudDayClose,
+  saveCloudXReport,
+} from "@/lib/cloud-sales";
 import {
   listSyncQueue,
   removeSyncQueueItem,
+  resetStuckSyncing,
   resetSyncRetries,
   updateSyncQueueItem,
 } from "./queue";
@@ -45,160 +48,55 @@ function maxRetriesFor(message: string | undefined): number {
     : MAX_RETRIES_PERMANENT;
 }
 
+function linesForPush(payload: CompleteSalePayload) {
+  if (payload.lines.length > 0) return payload.lines;
+  const raw = payload.localOrder?.lines || payload.localOrder?.sale_order_lines || [];
+  return raw.map((l) => ({
+    menuItem: {
+      id: l.menu_item_id || "",
+      organization_id: payload.orgId,
+      name: l.name,
+      category: "other" as const,
+      price: Number(l.unit_price),
+      available: true,
+      description: "",
+      vote_count: 0,
+      recipe: [],
+    },
+    quantity: Math.max(1, Math.round(Number(l.quantity))),
+  }));
+}
+
 /**
  * Push a locally recorded sale to Supabase.
- * Idempotent: safe to retry if order header landed but lines did not.
+ * Idempotent on client_order_id via completeCloudSale / complete_sale RPC.
  */
 async function pushLocalSale(payload: CompleteSalePayload) {
   const order = payload.localOrder;
   if (!order) throw new Error("Missing local order for sync.");
-  if (!order.receipt_number) throw new Error("Missing receipt number for sync.");
 
-  const supabase = createClient();
-  const orderLines = (order.lines || []).map((l) => ({
-    menu_item_id: l.menu_item_id || null,
-    name: l.name,
-    unit_price: Number(l.unit_price),
-    quantity: Math.max(1, Math.round(Number(l.quantity))),
-    line_total: Number(l.line_total),
-  }));
+  const lines = linesForPush(payload);
+  if (lines.length === 0) throw new Error("Sale has no lines to sync.");
 
-  if (orderLines.length === 0) {
-    throw new Error("Sale has no lines to sync.");
-  }
-
-  const findExisting = async () => {
-    const { data, error } = await supabase
-      .from("sale_orders")
-      .select("id")
-      .eq("organization_id", payload.orgId)
-      .eq("receipt_number", order.receipt_number)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    return data as { id: string } | null;
-  };
-
-  let existing = await findExisting();
-  let orderId = existing?.id ?? null;
-
-  if (!orderId) {
-    try {
-      const inserted = await insertSaleOrderRow({
-        organization_id: payload.orgId,
-        receipt_number: order.receipt_number,
-        subtotal: Number(order.subtotal),
-        service_charge: Number(order.service_charge),
-        vat: Number(order.vat),
-        total: Number(order.total),
-        payment_method: order.payment_method,
-        payment_reference: order.payment_reference,
-        payment_proof_url:
-          order.payment_proof_url ?? payload.paymentProofUrl ?? null,
-        cashier_name: order.cashier_name || "Cashier",
-        day_key: order.day_key,
-        status: order.status || "placed",
-        payment_status:
-          order.payment_status ||
-          (payload.markPaid ? "paid" : "unpaid"),
-        paid_at: order.paid_at ?? null,
-        paid_by: order.paid_by ?? null,
-        place_label: order.place_label ?? payload.placeLabel?.trim() ?? null,
-        kitchen_note: order.kitchen_note ?? payload.kitchenNote?.trim() ?? null,
-        created_at: order.created_at,
-        vat_percent: order.vat_percent ?? null,
-        service_percent: order.service_percent ?? null,
-      });
-      orderId = String(inserted.id);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      // Race: another attempt inserted the same receipt
-      if (/duplicate|unique/i.test(message) || message.includes("23505")) {
-        existing = await findExisting();
-        orderId = existing?.id ?? null;
-        if (!orderId) throw new Error(message);
-      } else {
-        throw new Error(message || "Sale sync failed");
-      }
-    }
-  }
-
-  const { count, error: countErr } = await supabase
-    .from("sale_order_lines")
-    .select("id", { count: "exact", head: true })
-    .eq("order_id", orderId);
-  if (countErr) throw new Error(countErr.message);
-
-  const needsLines = !count || count === 0;
-  if (needsLines) {
-    const { error: lineErr } = await supabase.from("sale_order_lines").insert(
-      orderLines.map((l) => ({ ...l, order_id: orderId })),
-    );
-    if (lineErr) throw new Error(lineErr.message);
-  }
-
-  // Only adjust stock/votes the first time lines land (avoid double deduction).
-  if (needsLines) {
-    const sourceLines =
-      payload.lines?.length > 0
-        ? payload.lines
-        : orderLines.map((l) => ({
-            menuItem: {
-              id: l.menu_item_id || "",
-              organization_id: payload.orgId,
-              name: l.name,
-              category: "other" as const,
-              price: l.unit_price,
-              available: true,
-              description: "",
-              vote_count: 0,
-              recipe: [] as {
-                inventory_item_id: string;
-                quantity_required: number;
-              }[],
-            },
-            quantity: l.quantity,
-          }));
-
-    for (const line of sourceLines) {
-      if (!line.menuItem?.id) continue;
-      const { data: menuRow } = await supabase
-        .from("menu_items")
-        .select("vote_count")
-        .eq("id", line.menuItem.id)
-        .maybeSingle();
-      if (menuRow) {
-        await supabase
-          .from("menu_items")
-          .update({
-            vote_count: (menuRow.vote_count || 0) + line.quantity,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", line.menuItem.id);
-      }
-
-      for (const recipe of line.menuItem.recipe || []) {
-        const { data: inv } = await supabase
-          .from("inventory_items")
-          .select("stock_qty")
-          .eq("id", recipe.inventory_item_id)
-          .maybeSingle();
-        if (!inv) continue;
-        const next = Math.max(
-          0,
-          Number(inv.stock_qty) - recipe.quantity_required * line.quantity,
-        );
-        await supabase
-          .from("inventory_items")
-          .update({
-            stock_qty: Math.round(next * 1000) / 1000,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", recipe.inventory_item_id);
-      }
-    }
-  }
-
-  return { id: orderId } as CloudSaleOrder;
+  const source = order.source === "online" ? "online" : "pos";
+  await completeCloudSale({
+    orgId: payload.orgId,
+    lines,
+    paymentMethod: order.payment_method,
+    paymentReference: order.payment_reference ?? payload.paymentReference,
+    paymentProofUrl: order.payment_proof_url ?? payload.paymentProofUrl,
+    cashierName: order.cashier_name || payload.cashierName,
+    placeLabel: order.place_label ?? payload.placeLabel,
+    kitchenNote: order.kitchen_note ?? payload.kitchenNote,
+    markPaid: Boolean(payload.markPaid || order.payment_status === "paid"),
+    clientOrderId: order.id,
+    createdAt: order.created_at,
+    source,
+    guestName: order.guest_name,
+    guestPhone: order.guest_phone,
+    guestNote: order.guest_note,
+    dayKey: order.day_key,
+  });
 }
 
 async function runItem(item: SyncQueueItem): Promise<void> {
@@ -265,12 +163,15 @@ export async function processSyncQueue(
   orgId?: string,
   options?: { resetFailed?: boolean },
 ): Promise<SyncResult> {
+  await resetStuckSyncing(orgId);
   if (options?.resetFailed) {
     await resetSyncRetries(orgId);
   }
 
   const queue = await listSyncQueue(orgId);
-  const pending = queue.filter((i) => i.status !== "syncing");
+  const pending = queue.filter(
+    (i) => i.status === "pending" || i.status === "failed",
+  );
   const result: SyncResult = {
     totalProcessed: 0,
     succeeded: 0,
