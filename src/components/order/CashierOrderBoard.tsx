@@ -98,8 +98,9 @@ export function CashierOrderBoard({
       } else {
         list = o.filter(
           (order) =>
-            order.status !== "completed" &&
-            (order.status !== "canceled" || (owner && !waiterView)),
+            filter === "today" ||
+            (order.status !== "completed" &&
+              (order.status !== "canceled" || (owner && !waiterView))),
         );
         if (waiterView) {
           list = list.filter((order) =>
