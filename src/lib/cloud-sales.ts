@@ -684,7 +684,7 @@ export async function listCloudOrders(
 
 export async function listOpenOrders(orgId: string, forDay?: string) {
   return listCloudOrders(orgId, {
-    dayKey: forDay || dayKey(new Date()),
+    dayKey: forDay,
     statuses: OPEN_STATUSES,
     limit: 80,
   });
@@ -692,7 +692,6 @@ export async function listOpenOrders(orgId: string, forDay?: string) {
 
 export async function listKitchenOrders(orgId: string) {
   return listCloudOrders(orgId, {
-    dayKey: dayKey(new Date()),
     statuses: ["placed", "preparing", "ready"],
     limit: 80,
   });
