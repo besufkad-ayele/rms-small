@@ -11,9 +11,15 @@ export function uid(prefix = "id"): string {
 }
 
 export function dayKey(date = new Date()): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Addis_Ababa",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const y = parts.find((part) => part.type === "year")?.value ?? "";
+  const m = parts.find((part) => part.type === "month")?.value ?? "";
+  const d = parts.find((part) => part.type === "day")?.value ?? "";
   return `${y}-${m}-${d}`;
 }
 
