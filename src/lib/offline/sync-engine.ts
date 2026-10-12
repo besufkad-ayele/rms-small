@@ -42,6 +42,20 @@ function isTransientError(message: string): boolean {
   );
 }
 
+/**
+ * Non-retryable errors: HTTP 400 (bad request / invalid payload) should
+ * never be retried — the data is permanently wrong. Fail immediately.
+ */
+function isPermanentError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes("400") ||
+    m.includes("bad request") ||
+    m.includes("missing local order") ||
+    m.includes("sale has no lines")
+  );
+}
+
 function maxRetriesFor(message: string | undefined): number {
   return message && isTransientError(message)
     ? MAX_RETRIES_TRANSIENT
@@ -204,10 +218,13 @@ export async function processSyncQueue(
       result.succeeded++;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Sync failed";
+      // Non-retryable errors (e.g. 400 Bad Request) fail immediately — no
+      // point hammering the server with data that will never be accepted.
+      const terminal = isPermanentError(message);
       await updateSyncQueueItem(item.id, {
-        status: "pending",
+        status: terminal ? "failed" : "pending",
         errorMessage: message,
-        incrementRetry: true,
+        incrementRetry: !terminal,
       });
       result.failed++;
       result.errors.push(`${item.actionType}: ${message}`);

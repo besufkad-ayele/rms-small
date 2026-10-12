@@ -68,8 +68,8 @@ export function SyncSuccessDialog() {
         </ul>
         {result.errors.length > 0 ? (
           <div className="mt-3 max-h-32 space-y-1 overflow-auto rounded-xl bg-coral/10 px-3 py-2 text-xs text-coral">
-            {result.errors.slice(0, 5).map((err) => (
-              <p key={err}>{err}</p>
+            {result.errors.slice(0, 5).map((err, idx) => (
+              <p key={`${idx}-${err}`}>{err}</p>
             ))}
           </div>
         ) : null}

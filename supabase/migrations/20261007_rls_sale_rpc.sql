@@ -459,11 +459,50 @@ UPDATE public.organizations SET platform_login_password = NULL
 WHERE platform_login_password IS NOT NULL;
 
 -- ═══════════════════════════════════════
--- complete_sale RPC
+-- complete_sale RPC schema prerequisites
 -- ═══════════════════════════════════════
 
+-- Ensure payment_method is TEXT on sale_orders (allows custom tenders & matches RPC argument type)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'sale_orders'
+      AND column_name = 'payment_method'
+      AND udt_name = 'payment_method'
+  ) THEN
+    ALTER TABLE public.sale_orders ALTER COLUMN payment_method DROP DEFAULT;
+    ALTER TABLE public.sale_orders ALTER COLUMN payment_method TYPE TEXT USING payment_method::text;
+    ALTER TABLE public.sale_orders ALTER COLUMN payment_method SET DEFAULT 'cash';
+    ALTER TABLE public.sale_orders ALTER COLUMN payment_method SET NOT NULL;
+  END IF;
+END $$;
+
+-- Ensure payment_status enum and columns exist
+DO $$ BEGIN
+  CREATE TYPE public.sale_payment_status AS ENUM ('unpaid', 'paid');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
 ALTER TABLE public.sale_orders
+  ADD COLUMN IF NOT EXISTS payment_status public.sale_payment_status DEFAULT 'unpaid',
+  ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS paid_by TEXT,
+  ADD COLUMN IF NOT EXISTS payment_proof_url TEXT,
+  ADD COLUMN IF NOT EXISTS vat_percent NUMERIC(5,2),
+  ADD COLUMN IF NOT EXISTS service_percent NUMERIC(5,2),
+  ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'pos',
+  ADD COLUMN IF NOT EXISTS guest_name TEXT,
+  ADD COLUMN IF NOT EXISTS guest_phone TEXT,
+  ADD COLUMN IF NOT EXISTS guest_note TEXT,
   ADD COLUMN IF NOT EXISTS client_order_id TEXT;
+
+ALTER TABLE public.sale_order_lines
+  ADD COLUMN IF NOT EXISTS round INT NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS kitchen_status TEXT NOT NULL DEFAULT 'placed',
+  ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 CREATE UNIQUE INDEX IF NOT EXISTS sale_orders_org_client_id_uidx
   ON public.sale_orders (organization_id, client_order_id)
@@ -641,7 +680,7 @@ BEGIN
       COALESCE(nullif(trim(p_cashier_name), ''), 'Cashier'),
       v_day,
       'placed',
-      CASE WHEN v_paid THEN 'paid' ELSE 'unpaid' END,
+      CASE WHEN v_paid THEN 'paid'::public.sale_payment_status ELSE 'unpaid'::public.sale_payment_status END,
       CASE WHEN v_paid THEN v_created ELSE NULL END,
       CASE WHEN v_paid THEN COALESCE(nullif(trim(p_cashier_name), ''), 'Cashier') ELSE NULL END,
       nullif(trim(p_place_label), ''),

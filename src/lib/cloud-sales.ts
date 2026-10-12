@@ -531,7 +531,9 @@ export async function completeCloudSale(input: {
     return mapOrder(rpcRow(data));
   }
   if (!isMissingCompleteSaleRpc(error)) {
-    throw new Error(error.message);
+    const status = (error as { status?: number }).status ?? 0;
+    const prefix = status ? `[HTTP ${status}] ` : "";
+    throw new Error(`${prefix}${error.message}`);
   }
 
   const mappedLines = input.lines.map(({ menuItem, quantity }) => ({
@@ -679,7 +681,7 @@ export async function listCloudOrders(
   if (opts?.statuses?.length) q = q.in("status", opts.statuses);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
-  return (data || []).map((o) => mapOrder(o as Record<string, unknown>));
+  return (data || []).map((o: Record<string, unknown>) => mapOrder(o));
 }
 
 export async function listOpenOrders(orgId: string, forDay?: string) {
@@ -823,7 +825,7 @@ export async function getCloudSalesSummary(
   const { data, error } = await q;
   if (error) throw new Error(error.message);
 
-  const all = (data || []).map((o) => mapOrder(o as Record<string, unknown>));
+  const all: CloudSaleOrder[] = (data || []).map((o: Record<string, unknown>) => mapOrder(o));
   // Finance: paid tickets only (unpaid kitchen orders do not count as revenue)
   const orders = all.filter((o) => isOrderPaid(o));
   const revenue = orders.reduce((s, o) => s + Number(o.total), 0);

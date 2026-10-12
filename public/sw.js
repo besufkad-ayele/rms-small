@@ -50,6 +50,10 @@ self.addEventListener("fetch", (event) => {
               return caches.match("/platform");
             }
             return caches.match("/app");
+          }).then((hit) => {
+            // caches.match() resolves to undefined on a complete miss —
+            // returning undefined from respondWith() throws a TypeError.
+            return hit ?? new Response("Offline", { status: 503 });
           }),
         ),
     );
@@ -64,15 +68,16 @@ self.addEventListener("fetch", (event) => {
     url.pathname.endsWith(".ico")
   ) {
     event.respondWith(
-      caches.match(req).then(
-        (hit) =>
-          hit ||
-          fetch(req).then((res) => {
+      caches.match(req).then((hit) => {
+        if (hit) return hit;
+        return fetch(req)
+          .then((res) => {
             const copy = res.clone();
             void caches.open(CACHE).then((c) => c.put(req, copy));
             return res;
-          }),
-      ),
+          })
+          .catch(() => new Response("Offline", { status: 503 }));
+      }),
     );
   }
 });

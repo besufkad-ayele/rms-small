@@ -18,7 +18,7 @@ export function LocaleToggle({
       aria-label={t("settings.language")}
       className={cn(
         "inline-flex max-w-full flex-wrap justify-center gap-1 rounded-2xl border p-1",
-        dark ? "border-white/20" : "border-ink/15",
+        dark ? "border-white/20 bg-white/[0.04] backdrop-blur-md" : "border-ink/15",
       )}
     >
       {LOCALES.map((opt) => {
@@ -34,11 +34,11 @@ export function LocaleToggle({
               "rounded-full px-2.5 py-1 text-xs font-medium transition",
               active
                 ? dark
-                  ? "bg-white/15 text-white"
+                  ? "bg-white/20 text-white font-semibold shadow-sm"
                   : "bg-ink text-stone"
                 : dark
-                  ? "text-white/60 hover:text-white"
-                  : "text-ink/55 hover:text-ink",
+                  ? "text-white/75 hover:text-white hover:bg-white/10"
+                  : "text-ink/65 hover:text-ink hover:bg-ink/5",
             )}
           >
             {opt.native}
