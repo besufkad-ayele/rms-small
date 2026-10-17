@@ -1,5 +1,6 @@
 "use server";
 
+import { ensureConfiguredPlatformAdmin } from "@/lib/platform-admin";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 import type { PackageRow } from "@/lib/pricing";
 
@@ -316,36 +317,29 @@ export async function getMyApplicationByEmailAction(email: string) {
   return { application: data };
 }
 
-export async function adminLoginAction(email: string, password: string) {
+export async function syncAuthSessionAction(
+  accessToken: string,
+  refreshToken: string,
+) {
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: email.trim().toLowerCase(),
-    password,
+  const { data, error: sessionError } = await supabase.auth.setSession({
+    access_token: accessToken,
+    refresh_token: refreshToken,
   });
-  if (error) return { error: error.message };
+  if (sessionError) return { error: sessionError.message };
+  const user = data.user;
+  if (!user) return { error: "Not signed in" };
 
   const admin = createAdminClient();
-  const adminEmail = (
-    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_EMAIL || "admin@aramis.product"
-  ).toLowerCase();
+  const promotionError = await ensureConfiguredPlatformAdmin(admin, user);
+  if (promotionError) return { error: promotionError };
 
-  if (data.user?.email?.toLowerCase() === adminEmail) {
-    await admin
-      .from("profiles")
-      .update({ is_platform_admin: true, email: data.user.email })
-      .eq("id", data.user.id);
-  }
-
-  const { data: profile } = await admin
+  const { data: profile, error } = await admin
     .from("profiles")
     .select("is_platform_admin")
-    .eq("id", data.user!.id)
+    .eq("id", user.id)
     .maybeSingle();
+  if (error) return { error: error.message };
 
-  if (!profile?.is_platform_admin) {
-    await supabase.auth.signOut();
-    return { error: "This account is not an Aramis platform admin." };
-  }
-
-  return { ok: true as const };
+  return { ok: true as const, isPlatformAdmin: Boolean(profile?.is_platform_admin) };
 }

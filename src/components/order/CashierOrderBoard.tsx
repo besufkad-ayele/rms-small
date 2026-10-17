@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
 import {
   Ban,
   Banknote,
@@ -34,6 +35,7 @@ import {
 import { canCashierOrderOps, isOwner } from "@/lib/permissions";
 import { subscribeOrgOrderChanges } from "@/lib/realtime-orders";
 import { uploadSalePaymentProof } from "@/lib/sale-payment-proof";
+import { listQueuedLocalSales } from "@/lib/offline/local-sale";
 import {
   SALE_ORDER_STATUS_LABELS,
   SALE_PAYMENT_STATUS_LABELS,
@@ -43,6 +45,11 @@ import {
 import { cn, dayKey, formatDateTime, formatMoney } from "@/lib/utils";
 
 type FilterMode = "open" | "paid" | "today" | "completed" | "all";
+
+const NO_QUEUED_SALES: Array<{
+  order: CloudSaleOrder;
+  queueId: string;
+}> = [];
 
 export function CashierOrderBoard({
   onAddItems,
@@ -56,9 +63,48 @@ export function CashierOrderBoard({
   const cashierOps = canCashierOrderOps(tenant!.membership);
   const waiterView = !cashierOps;
   const [orders, setOrders] = useState<CloudSaleOrder[]>([]);
+  const [filter, setFilter] = useState<FilterMode>(owner ? "today" : "open");
+  const queuedLocalSales =
+    useLiveQuery(() => listQueuedLocalSales(orgId), [orgId], NO_QUEUED_SALES) ??
+    NO_QUEUED_SALES;
+  const queuedOrderIds = useMemo(
+    () => new Set(queuedLocalSales.map(({ order }) => order.id)),
+    [queuedLocalSales],
+  );
+  const visibleOrders = useMemo(() => {
+    const syncedIds = new Set(
+      orders.flatMap((order) =>
+        order.client_order_id ? [order.client_order_id] : [order.id],
+      ),
+    );
+    const combined = [
+      ...orders,
+      ...queuedLocalSales
+        .filter(({ order }) => !syncedIds.has(order.id))
+        .map(({ order }) => order),
+    ];
+    let list: CloudSaleOrder[];
+    if (filter === "completed") {
+      list = combined.filter((order) => order.status === "completed");
+    } else if (filter === "all") {
+      list = combined;
+    } else {
+      list = combined.filter(
+        (order) =>
+          filter === "today" ||
+          (order.status !== "completed" &&
+            (order.status !== "canceled" || (owner && !waiterView))),
+      );
+      if (waiterView) {
+        list = list.filter((order) =>
+          filter === "paid" ? isOrderPaid(order) : !isOrderPaid(order),
+        );
+      }
+    }
+    return list;
+  }, [orders, queuedLocalSales, filter, owner, waiterView]);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<FilterMode>(owner ? "today" : "open");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [printOrder, setPrintOrder] = useState<CloudSaleOrder | null>(null);
   const [payDraft, setPayDraft] = useState<{
@@ -80,7 +126,7 @@ export function CashierOrderBoard({
 
   const reload = useCallback(async () => {
     try {
-      const o = await listCloudOrders(orgId, {
+      const cloud = await listCloudOrders(orgId, {
         dayKey: filter === "all" ? undefined : dayKey(new Date()),
         statuses:
           filter === "completed"
@@ -90,25 +136,7 @@ export function CashierOrderBoard({
               : undefined,
         limit: owner && filter === "all" ? 250 : 120,
       });
-      let list: CloudSaleOrder[];
-      if (filter === "completed") {
-        list = o.filter((order) => order.status === "completed");
-      } else if (filter === "all") {
-        list = o;
-      } else {
-        list = o.filter(
-          (order) =>
-            filter === "today" ||
-            (order.status !== "completed" &&
-              (order.status !== "canceled" || (owner && !waiterView))),
-        );
-        if (waiterView) {
-          list = list.filter((order) =>
-            filter === "paid" ? isOrderPaid(order) : !isOrderPaid(order),
-          );
-        }
-      }
-      setOrders(list);
+      setOrders(cloud);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load orders");
@@ -134,14 +162,16 @@ export function CashierOrderBoard({
   }, [orgId, reload]);
 
   useEffect(() => {
-    if (!orders.length) {
+    if (!visibleOrders.length) {
       setSelectedId(null);
       return;
     }
     setSelectedId((prev) =>
-      prev && orders.some((o) => o.id === prev) ? prev : orders[0].id,
+      prev && visibleOrders.some((o) => o.id === prev)
+        ? prev
+        : visibleOrders[0].id,
     );
-  }, [orders]);
+  }, [visibleOrders]);
 
   useEffect(() => {
     if (!printOrder) return;
@@ -158,8 +188,8 @@ export function CashierOrderBoard({
   }, [selectedId]);
 
   const selected = useMemo(
-    () => orders.find((o) => o.id === selectedId) ?? null,
-    [orders, selectedId],
+    () => visibleOrders.find((o) => o.id === selectedId) ?? null,
+    [visibleOrders, selectedId],
   );
 
   function clearProof() {
@@ -367,7 +397,7 @@ export function CashierOrderBoard({
         </p>
       ) : null}
 
-      {orders.length === 0 ? (
+      {visibleOrders.length === 0 ? (
         <p className="rounded-3xl border border-dashed border-ink/15 py-12 text-center text-sm text-ink/45">
           No orders in this view yet.
         </p>
@@ -379,7 +409,9 @@ export function CashierOrderBoard({
                 order={selected}
                 busy={busyId === selected.id}
                 cashierOps={cashierOps}
-                owner={owner}
+                syncPending={queuedOrderIds.has(
+                  selected.client_order_id || selected.id,
+                )}
                 onAddItems={onAddItems}
                 payMethods={payMethods}
                 payDraft={
@@ -406,7 +438,7 @@ export function CashierOrderBoard({
           </div>
 
           <ul className="order-2 max-h-[55vh] space-y-2 overflow-y-auto overscroll-contain lg:order-1 lg:max-h-[calc(100vh-11rem)]">
-            {orders.map((order) => {
+            {visibleOrders.map((order) => {
               const lines = orderLines(order);
               const qty = lines.reduce((sum, line) => sum + Number(line.quantity), 0);
               const sends = new Set(lines.map((line) => lineRound(line))).size;
@@ -452,6 +484,13 @@ export function CashierOrderBoard({
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1">
                         <StatusPill status={order.status} />
+                        {queuedOrderIds.has(
+                          order.client_order_id || order.id,
+                        ) ? (
+                          <span className="rounded-full bg-gold/25 px-2 py-0.5 text-[10px] font-medium text-ink/70">
+                            Waiting to sync
+                          </span>
+                        ) : null}
                         {cashierOps ? (
                           <PaymentPill status={paid ? "paid" : "unpaid"} />
                         ) : null}
@@ -488,7 +527,7 @@ function OrderDetailPanel({
   order,
   busy,
   cashierOps,
-  owner,
+  syncPending,
   payMethods,
   payDraft,
   proofPreview,
@@ -505,7 +544,7 @@ function OrderDetailPanel({
   order: CloudSaleOrder;
   busy: boolean;
   cashierOps: boolean;
-  owner: boolean;
+  syncPending: boolean;
   payMethods: OrgPaymentMethod[];
   payDraft: { method: string; reference: string } | null;
   proofPreview: string | null;
@@ -599,6 +638,13 @@ function OrderDetailPanel({
         </p>
       ) : null}
 
+      {syncPending ? (
+        <p className="mt-3 rounded-xl bg-gold/15 px-3 py-2 text-xs text-ink/70">
+          This order is saved on this device and waiting to sync. Payment and
+          order updates will be available once it is online.
+        </p>
+      ) : null}
+
       {order.kitchen_note ? (
         <p className="mt-2 rounded-xl bg-stone/50 px-2.5 py-1.5 text-xs text-ink/65">
           Kitchen: {order.kitchen_note}
@@ -662,7 +708,11 @@ function OrderDetailPanel({
         ))}
       </div>
 
-      {!cashierOps && !paid && order.status !== "canceled" && onSendPhoto ? (
+      {!syncPending &&
+      !cashierOps &&
+      !paid &&
+      order.status !== "canceled" &&
+      onSendPhoto ? (
         <div className="mt-3 space-y-2 rounded-2xl border border-gold/30 bg-gold/10 p-3">
           <p className="text-xs font-semibold text-ink/70">
             {order.payment_proof_url
@@ -695,6 +745,7 @@ function OrderDetailPanel({
       {onAddItems &&
       order.status !== "canceled" &&
       order.status !== "completed" &&
+      !syncPending &&
       (cashierOps || !paid) ? (
         <button
           type="button"
@@ -727,7 +778,7 @@ function OrderDetailPanel({
         </div>
       </div>
 
-      {cashierOps && !paid && order.status !== "canceled" ? (
+      {cashierOps && !syncPending && !paid && order.status !== "canceled" ? (
         <div className="mt-4 space-y-2 rounded-2xl border border-gold/30 bg-gold/10 p-3">
           <p className="text-xs font-semibold text-ink/70">
             {order.payment_proof_url
@@ -790,7 +841,7 @@ function OrderDetailPanel({
           ) : null}
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || syncPending}
             onClick={onMarkPaid}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-teal px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-50"
           >
@@ -814,7 +865,7 @@ function OrderDetailPanel({
         {order.status !== "completed" && order.status !== "canceled" ? (
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || syncPending}
             onClick={onComplete}
             className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-teal/90 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-50"
           >
@@ -822,7 +873,7 @@ function OrderDetailPanel({
             Complete
           </button>
         ) : null}
-        {cashierOps && canRequestCancel(order) ? (
+        {cashierOps && !syncPending && canRequestCancel(order) ? (
           <button
             type="button"
             disabled={busy}

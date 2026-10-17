@@ -66,7 +66,7 @@ export function OrderPOS({
 
   useEffect(() => {
     void reload().catch((e) =>
-      setError(e instanceof Error ? e.message : "Failed to load menu"),
+      setError(e instanceof Error ? e.message : t("order.error.loadMenu")),
     );
   }, [reload]);
 
@@ -163,9 +163,17 @@ export function OrderPOS({
         setKitchenNote("");
         const count = cart.reduce((sum, line) => sum + line.quantity, 0);
         setPlacedNote(
-          `Added ${count} item${count === 1 ? "" : "s"} to ${result.order.receipt_number}${result.order.place_label ? ` · ${result.order.place_label}` : ""}. Same receipt, new kitchen send.${
+          `${t("order.toast.added", {
+            count,
+            receipt: result.order.receipt_number,
+            place: result.order.place_label
+              ? ` · ${result.order.place_label}`
+              : "",
+          })}${
             cashierOps
-              ? ` Bill is now ${formatMoney(Number(result.order.total))}.${result.reopenedPayment ? " Mark paid again for the new total." : ""}`
+              ? `${t("order.toast.billNow", {
+                  amount: formatMoney(Number(result.order.total)),
+                })}${result.reopenedPayment ? t("order.toast.markPaidAgain") : ""}`
               : ""
           }`,
         );
@@ -188,21 +196,25 @@ export function OrderPOS({
       setPlaceLabel("");
       setKitchenNote("");
       if (offlineQueued) {
-        setQueuedNote(
-          "Saved on this device. Will sync when the connection is fast enough.",
-        );
+        setQueuedNote(t("order.toast.offlineQueued"));
         await refreshPendingCount();
       }
       setPlacedNote(
         cashierOps
-          ? `${order.receipt_number} placed (unpaid)${order.place_label ? ` · ${order.place_label}` : ""}. Mark paid under Placed orders, then print.`
-          : `${order.receipt_number} placed${order.place_label ? ` · ${order.place_label}` : ""}. It stays on your open list until the cashier marks it paid.`,
+          ? t("order.toast.placedCashier", {
+              receipt: order.receipt_number,
+              place: order.place_label ? ` · ${order.place_label}` : "",
+            })
+          : t("order.toast.placedWaiter", {
+              receipt: order.receipt_number,
+              place: order.place_label ? ` · ${order.place_label}` : "",
+            }),
       );
       await reloadOpen();
       await reload();
       window.setTimeout(() => onPlaced?.(), 600);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Sale failed");
+      setError(e instanceof Error ? e.message : t("order.error.saleFailed"));
     } finally {
       setBusy(false);
     }
@@ -211,21 +223,21 @@ export function OrderPOS({
   const cartPanel = (
     <section className="flex max-h-[min(52vh,26rem)] flex-col overflow-hidden rounded-3xl border border-white/10 bg-shell p-4 text-shell-fg shadow-lg sm:p-5 lg:max-h-[calc(100vh-7rem)]">
       <h2 className="shrink-0 font-display text-xl text-gold">
-        {appendTo ? appendTo.receipt_number : "Current order"}
+        {appendTo ? appendTo.receipt_number : t("order.cart.title")}
       </h2>
       {appendTo ? (
         <div className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-gold/15 px-3 py-2 text-xs text-shell-fg">
           <p>
-            Adding onto this receipt
-            {appendTo.place_label ? ` · ${appendTo.place_label}` : ""}. Same
-            bill, new kitchen send.
+            {t("order.cart.addingOn", {
+              place: appendTo.place_label ? ` · ${appendTo.place_label}` : "",
+            })}
           </p>
           <button
             type="button"
             onClick={onClearAppend}
             className="shrink-0 font-semibold text-gold"
           >
-            New receipt
+            {t("order.cart.newReceipt")}
           </button>
         </div>
       ) : null}
@@ -239,13 +251,13 @@ export function OrderPOS({
               {line.quantity}× {line.name}
             </span>
             <span className="shrink-0 text-[11px] uppercase tracking-wide">
-              On bill
+              {t("order.cart.onBill")}
             </span>
           </li>
         ))}
         {cart.length > 0 && alreadyOnReceipt.length > 0 ? (
           <li className="px-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-gold">
-            Adding now
+            {t("order.cart.addingNow")}
           </li>
         ) : null}
         {cart.map((line) => (
@@ -297,33 +309,35 @@ export function OrderPOS({
         ))}
         {cart.length === 0 && alreadyOnReceipt.length === 0 ? (
           <p className="py-4 text-center text-sm text-shell-fg/50 lg:py-8">
-            Tap a dish to add it
+            {t("order.cart.empty")}
           </p>
         ) : null}
       </ul>
 
       <div className="mt-3 shrink-0 space-y-2.5 border-t border-white/10 pt-3 sm:space-y-3">
         <div className="flex justify-between text-sm">
-          <span className="text-shell-fg/70">Subtotal</span>
+          <span className="text-shell-fg/70">{t("common.subtotal")}</span>
           <span>{formatMoney(subtotal)}</span>
         </div>
         <input
           value={appendTo ? appendTo.place_label || "" : placeLabel}
           onChange={(e) => setPlaceLabel(e.target.value)}
           readOnly={Boolean(appendTo)}
-          placeholder="Table / place (e.g. T3, Patio)"
+          placeholder={t("order.cart.placePlaceholder")}
           className="w-full rounded-xl border border-white/15 bg-black/25 px-3 py-2.5 text-sm text-shell-fg outline-none placeholder:text-shell-fg/40 read-only:opacity-80"
         />
         <input
           value={kitchenNote}
           onChange={(e) => setKitchenNote(e.target.value)}
-          placeholder="Kitchen note (optional)"
+          placeholder={t("order.cart.kitchenNotePlaceholder")}
           className="w-full rounded-xl border border-white/15 bg-black/25 px-3 py-2.5 text-sm text-shell-fg outline-none placeholder:text-shell-fg/40"
         />
         <p className="text-[11px] text-shell-fg/50">
           {matchingOrder
-            ? `Adds onto ${matchingOrder.receipt_number}. One bill, a new kitchen send.`
-            : "Same table later? Use the same place name to add onto that bill."}
+            ? t("order.cart.matchAppend", {
+                receipt: matchingOrder.receipt_number,
+              })
+            : t("order.cart.matchPlaceHint")}
         </p>
         {error ? (
           <p className="rounded-xl bg-coral/20 px-3 py-2 text-sm text-coral">
@@ -338,10 +352,12 @@ export function OrderPOS({
         >
           <CheckCircle2 className="h-4 w-4" />
           {busy
-            ? "Sending…"
+            ? t("common.sending")
             : matchingOrder
-              ? `Add to ${matchingOrder.receipt_number}`
-              : "Place order"}
+              ? t("order.cart.addToReceipt", {
+                  receipt: matchingOrder.receipt_number,
+                })
+              : t("order.cart.placeOrder")}
         </button>
       </div>
     </section>
@@ -353,7 +369,7 @@ export function OrderPOS({
         <Chip
           active={category === "all"}
           onClick={() => setCategory("all")}
-          label="All"
+          label={t("common.all")}
         />
         {MENU_CATEGORIES.map((c) => (
           <Chip
@@ -396,7 +412,7 @@ export function OrderPOS({
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center text-[10px] text-ink/35">
-                    No photo
+                    {t("order.menu.noPhoto")}
                   </div>
                 )}
               </div>
@@ -452,7 +468,7 @@ export function OrderPOS({
         })}
         {filtered.length === 0 ? (
           <p className="col-span-full py-10 text-center text-sm text-ink/50">
-            No menu items yet. Add some under Menu.
+            {t("order.menu.empty")}
           </p>
         ) : null}
       </div>

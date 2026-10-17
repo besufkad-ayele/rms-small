@@ -10,6 +10,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { useI18n } from "@/components/i18n/LocaleProvider";
 import { useOfflineSync } from "@/components/offline/OfflineSyncProvider";
 import { getDailySalesPoint, type DailySalesPoint } from "@/lib/daily-reports";
 import {
@@ -29,6 +30,7 @@ const VIEWS: { id: ReportView; label: string; icon: typeof FileBarChart2 }[] = [
 
 export function DailySalesPanel() {
   const { tenant } = useAuth();
+  const { t } = useI18n();
   const { refreshPendingCount } = useOfflineSync();
   const orgId = tenant!.organization.id;
   const today = dayKey();
@@ -62,11 +64,11 @@ export function DailySalesPanel() {
             : "",
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load daily report");
+      setError(e instanceof Error ? e.message : t("daily.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [orgId, today]);
+  }, [orgId, today, t]);
 
   useEffect(() => {
     void reload();
@@ -109,7 +111,7 @@ export function DailySalesPanel() {
     try {
       const cashAtHand = Number(xCash);
       if (!Number.isFinite(cashAtHand) || cashAtHand < 0) {
-        throw new Error("Enter the money at hand.");
+        throw new Error(t("daily.enterCash"));
       }
       const { offlineQueued } = await saveXReportResilient({
         orgId,
@@ -123,11 +125,11 @@ export function DailySalesPanel() {
       await reload();
       setXSavedNote(
         offlineQueued
-          ? "X cash count saved on this device — will sync when online."
-          : "X cash count recorded.",
+          ? t("daily.xSavedOffline")
+          : t("daily.xSaved"),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "X cash count failed");
+      setError(err instanceof Error ? err.message : t("daily.xFailed"));
     } finally {
       setXBusy(false);
     }
@@ -154,7 +156,7 @@ export function DailySalesPanel() {
       await reload();
       setView("compare");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Z-Report close failed");
+      setError(err instanceof Error ? err.message : t("daily.zFailed"));
     } finally {
       setBusy(false);
     }
@@ -180,7 +182,7 @@ export function DailySalesPanel() {
             className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-medium"
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
+            {t("common.refresh")}
           </button>
         </div>
 
@@ -215,7 +217,19 @@ export function DailySalesPanel() {
         ) : null}
       </section>
 
-      <SegmentedTabs tabs={VIEWS} value={view} onChange={setView} />
+      <SegmentedTabs
+        tabs={VIEWS.map((v) => ({
+          ...v,
+          label:
+            v.id === "x"
+              ? t("daily.xReport")
+              : v.id === "z"
+                ? t("daily.zReport")
+                : t("daily.compare"),
+        }))}
+        value={view}
+        onChange={setView}
+      />
 
       {error ? (
         <p className="rounded-xl bg-coral/15 px-3 py-2 text-sm text-coral">

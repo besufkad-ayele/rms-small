@@ -1,39 +1,71 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
-import { adminLoginAction } from "@/app/apply/actions";
+import { syncAuthSessionAction } from "@/app/apply/actions";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { createClient } from "@/lib/supabase/client";
 
 export default function AdminLoginPage() {
-  const { ready, isPlatformAdmin, refresh } = useAuth();
-  const router = useRouter();
+  const { ready, isPlatformAdmin, refresh, logout } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
-    if (ready && isPlatformAdmin) router.replace("/platform");
-  }, [ready, isPlatformAdmin, router]);
+    if (ready && isPlatformAdmin && !busy) {
+      window.location.replace("/platform");
+    }
+  }, [ready, isPlatformAdmin, busy]);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     const fd = new FormData(e.currentTarget);
-    const res = await adminLoginAction(
-      String(fd.get("email") ?? ""),
-      String(fd.get("password") ?? ""),
-    );
-    if ("error" in res && res.error) {
+    let signedIn = false;
+    try {
+      const supabase = createClient();
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: String(fd.get("email") ?? "").trim().toLowerCase(),
+        password: String(fd.get("password") ?? ""),
+      });
+      if (signInError) {
+        setError(signInError.message);
+        return;
+      }
+      if (!data.session) {
+        setError("Sign-in succeeded, but no session was returned. Please try again.");
+        return;
+      }
+      signedIn = true;
+
+      const res = await syncAuthSessionAction(
+        data.session.access_token,
+        data.session.refresh_token,
+      );
+      if ("error" in res && res.error) {
+        await logout();
+        signedIn = false;
+        setError(res.error);
+        return;
+      }
+      if (!res.isPlatformAdmin) {
+        await logout();
+        signedIn = false;
+        setError("This account is not an Aramis platform admin.");
+        return;
+      }
+
+      await refresh();
+      signedIn = false;
+      window.location.replace("/platform");
+    } catch (err) {
+      if (signedIn) await logout();
+      setError(err instanceof Error ? err.message : "Could not sign in.");
+    } finally {
       setBusy(false);
-      setError(res.error);
-      return;
     }
-    await refresh();
-    setBusy(false);
-    router.replace("/platform");
   }
 
   return (

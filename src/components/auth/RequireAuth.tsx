@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 import { AppShell } from "@/components/layout/AppShell";
+import { useI18n } from "@/components/i18n/LocaleProvider";
 import { isOwner } from "@/lib/permissions";
 import type { AppModule } from "@/lib/tenant";
 import type { StaffFeature } from "@/lib/permissions";

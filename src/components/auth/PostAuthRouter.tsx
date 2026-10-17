@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
+import { useI18n } from "@/components/i18n/LocaleProvider";
 import { isOwner } from "@/lib/permissions";
 
 /**
@@ -12,10 +13,12 @@ import { isOwner } from "@/lib/permissions";
  * Never flash /onboarding while tenant is still loading.
  */
 export function PostAuthRouter({
-  message = "Signing you in…",
+  message,
 }: {
   message?: string;
 }) {
+  const { t } = useI18n();
+  const displayMessage = message ?? t("auth.signingIn");
   const {
     ready,
     sessionResolved,
@@ -40,7 +43,7 @@ export function PostAuthRouter({
     }
 
     if (isPlatformAdmin && !hasMembership) {
-      router.replace("/platform");
+      window.location.replace("/platform");
       return;
     }
 
@@ -94,11 +97,11 @@ export function PostAuthRouter({
           onClick={() => void refresh()}
           className="rounded-xl bg-teal px-5 py-2.5 text-sm font-semibold text-white"
         >
-          Retry
+          {t("pending.retry")}
         </button>
       </div>
     );
   }
 
-  return <AuthLoadingScreen message={message} />;
+  return <AuthLoadingScreen message={displayMessage} />;
 }

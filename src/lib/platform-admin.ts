@@ -1,6 +1,44 @@
 import { createAdminClient, createClient } from "@/lib/supabase/server";
+import type { User } from "@supabase/supabase-js";
 
 export type AdminClient = ReturnType<typeof createAdminClient>;
+
+export async function ensureConfiguredPlatformAdmin(
+  admin: AdminClient,
+  user: User,
+): Promise<string | null> {
+  const adminEmail = (
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_EMAIL || "admin@aramis.product"
+  ).toLowerCase();
+  if (user.email?.toLowerCase() !== adminEmail || !user.email_confirmed_at) {
+    return null;
+  }
+
+  const { data: profile, error: lookupError } = await admin
+    .from("profiles")
+    .select("full_name, is_platform_admin")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (lookupError) return lookupError.message;
+  if (profile?.is_platform_admin) return null;
+
+  const metadataName =
+    typeof user.user_metadata?.full_name === "string"
+      ? user.user_metadata.full_name.trim()
+      : "";
+  const fullName =
+    profile?.full_name || metadataName || user.email.split("@")[0];
+  const { error } = await admin.from("profiles").upsert(
+    {
+      id: user.id,
+      email: user.email,
+      full_name: fullName,
+      is_platform_admin: true,
+    },
+    { onConflict: "id" },
+  );
+  return error?.message ?? null;
+}
 
 export async function requirePlatformAdmin() {
   const supabase = await createClient();
@@ -10,21 +48,15 @@ export async function requirePlatformAdmin() {
   if (!user) return { error: "Not signed in" as const };
 
   const admin = createAdminClient();
-  const adminEmail = (
-    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_EMAIL || "admin@aramis.product"
-  ).toLowerCase();
-  if (user.email?.toLowerCase() === adminEmail && user.email_confirmed_at) {
-    await admin
-      .from("profiles")
-      .update({ is_platform_admin: true, email: user.email })
-      .eq("id", user.id);
-  }
+  const promotionError = await ensureConfiguredPlatformAdmin(admin, user);
+  if (promotionError) return { error: promotionError };
 
-  const { data: profile } = await admin
+  const { data: profile, error: profileError } = await admin
     .from("profiles")
     .select("*")
     .eq("id", user.id)
     .maybeSingle();
+  if (profileError) return { error: profileError.message };
 
   if (!profile?.is_platform_admin) {
     return { error: "Not a platform admin" as const };

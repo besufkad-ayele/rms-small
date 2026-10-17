@@ -2043,26 +2043,46 @@ export async function getPlatformOverviewAction(): Promise<
   if ("error" in gate) return { error: gate.error ?? "Unauthorized" };
   const { admin } = gate;
 
-  const [{ data: orgs }, { data: subs }, { data: apps }, proofsRes, catalog] =
-    await Promise.all([
+  const [
+    { data: orgs, error: orgsError },
+    { data: subs, error: subsError },
+    { data: apps, error: appsError },
+    proofsRes,
+    { data: packages, error: packagesError },
+    { data: modulePrices, error: modulePricesError },
+  ] = await Promise.all([
+    admin
+      .from("organizations")
+      .select("id, name, verification_status, created_at"),
+    admin.from("subscriptions").select("*"),
+    admin
+      .from("applications")
+      .select("id, company_name, status, created_at")
+      .eq("status", "pending"),
+    fetchAllRows<Record<string, unknown>>((from, to) =>
       admin
-        .from("organizations")
-        .select("id, name, verification_status, created_at"),
-      admin.from("subscriptions").select("*"),
-      admin
-        .from("applications")
-        .select("id, company_name, status, created_at")
-        .eq("status", "pending"),
-      fetchAllRows<Record<string, unknown>>((from, to) =>
-        admin
-          .from("payment_proofs")
-          .select(
-            "id, organization_id, amount, status, months_requested, reviewed_at, created_at, organizations(name)",
-          )
-          .range(from, to),
-      ),
-      loadCatalog(admin),
-    ]);
+        .from("payment_proofs")
+        .select(
+          "id, organization_id, amount, status, months_requested, reviewed_at, created_at, organizations(name)",
+        )
+        .range(from, to),
+    ),
+    admin.from("subscription_packages").select("*"),
+    admin.from("subscription_module_prices").select("*").eq("active", true),
+  ]);
+  const queryError =
+    orgsError ||
+    subsError ||
+    appsError ||
+    (proofsRes.error ? { message: proofsRes.error } : null) ||
+    packagesError ||
+    modulePricesError;
+  if (queryError) return { error: queryError.message };
+
+  const catalog = {
+    packages: (packages || []) as PackageRow[],
+    modulePrices: (modulePrices || []) as ModulePriceRow[],
+  };
 
   const orgList = orgs || [];
   const appList = apps || [];

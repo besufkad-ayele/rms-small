@@ -1,4 +1,5 @@
 import type { User } from "@supabase/supabase-js";
+import { syncAuthSessionAction } from "@/app/apply/actions";
 import { db } from "@/lib/db";
 import {
   optionalEmail,
@@ -90,6 +91,24 @@ export async function signIn(email: string, password: string) {
     password,
   });
   if (error) return { error: error.message };
+  if (!data.session) {
+    return { error: "Sign-in succeeded, but no session was returned. Please try again." };
+  }
+  try {
+    const sync = await syncAuthSessionAction(
+      data.session.access_token,
+      data.session.refresh_token,
+    );
+    if ("error" in sync) {
+      await signOut();
+      return { error: sync.error };
+    }
+  } catch (err) {
+    await signOut();
+    return {
+      error: err instanceof Error ? err.message : "Could not verify your session.",
+    };
+  }
   return { user: data.user, session: data.session };
 }
 

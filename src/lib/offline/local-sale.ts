@@ -4,8 +4,8 @@ import { getOrgReceiptSettings } from "@/lib/org-tax";
 import { dayKey } from "@/lib/utils";
 import { db, getMeta } from "@/lib/db";
 import { applyLocalStockDeduction } from "./cache";
-import { ensureClientOrderId } from "./sale-identity";
 import type { CompleteSalePayload } from "./types";
+import { ensureClientOrderId } from "./sale-identity";
 
 async function nextLocalReceipt(orgId: string): Promise<string> {
   return db.transaction("rw", db.meta, async () => {
@@ -99,4 +99,42 @@ export async function recordSaleLocally(
 
   await applyLocalStockDeduction(input.orgId, input.lines);
   return order;
+}
+
+export async function listQueuedLocalSales(
+  orgId: string,
+): Promise<Array<{ order: CloudSaleOrder; queueId: string }>> {
+  const queued = await db.syncQueue.where("orgId").equals(orgId).toArray();
+  const result: Array<{ order: CloudSaleOrder; queueId: string }> = [];
+
+  for (const item of queued) {
+    if (item.actionType !== "COMPLETE_SALE") continue;
+    const payload = item.payload;
+    if (!payload || typeof payload !== "object" || !("localOrder" in payload)) {
+      continue;
+    }
+    const order = payload.localOrder;
+    if (
+      !order ||
+      typeof order !== "object" ||
+      !("id" in order) ||
+      typeof order.id !== "string" ||
+      !("organization_id" in order) ||
+      order.organization_id !== orgId ||
+      !("receipt_number" in order) ||
+      typeof order.receipt_number !== "string" ||
+      !("created_at" in order) ||
+      typeof order.created_at !== "string" ||
+      !("lines" in order) ||
+      !Array.isArray(order.lines)
+    ) {
+      continue;
+    }
+    result.push({
+      order: order as CloudSaleOrder,
+      queueId: item.id,
+    });
+  }
+
+  return result;
 }

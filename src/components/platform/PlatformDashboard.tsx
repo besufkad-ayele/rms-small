@@ -57,6 +57,7 @@ import {
 } from "./platform-ui";
 import { SectionShimmer } from "@/components/ui/Shimmer";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { useI18n } from "@/components/i18n/LocaleProvider";
 import { OwnerAlertsCard, usePlatformAlerts } from "./PlatformAlerts";
 import { PlatformProfile, profileInitials } from "./PlatformProfile";
 
@@ -105,6 +106,7 @@ function DashboardInner({
   setBusy: (v: boolean) => void;
 }) {
   const toast = useToast();
+  const { t } = useI18n();
   const { profile, user } = useAuth();
   const adminName = profile?.full_name?.trim() || "Platform admin";
   const adminEmail = profile?.email || user?.email || "";
@@ -140,6 +142,7 @@ function DashboardInner({
   const [usage, setUsage] = useState<Record<string, TenantUsage> | null>(null);
   const [usageDayKeys, setUsageDayKeys] = useState<string[]>([]);
   const [usageLoading, setUsageLoading] = useState(false);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [lastCreds, setLastCreds] = useState<{
@@ -270,12 +273,24 @@ function DashboardInner({
   }, [reportLoad]);
 
   const loadOverview = useCallback(async () => {
-    const o = await getPlatformOverviewAction();
-    if ("error" in o) {
-      reportLoad("overview", o.error);
-      return;
+    setOverviewError(null);
+    try {
+      const o = await getPlatformOverviewAction();
+      if ("error" in o) {
+        setOverviewError(o.error);
+        reportLoad("overview", o.error);
+        return;
+      }
+      setStats(o.stats);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Could not load platform overview";
+      setOverviewError(message);
+      reportLoad(
+        "overview",
+        message,
+      );
     }
-    setStats(o.stats);
   }, [reportLoad]);
 
   const loadUsage = useCallback(async () => {
@@ -293,14 +308,17 @@ function DashboardInner({
   const reloadAll = useCallback(async () => {
     setLoading(true);
     void loadUsage();
-    await Promise.all([
-      loadTenants(),
-      loadApplications(),
-      loadProofs(),
-      loadCatalog(),
-      loadOverview(),
-    ]);
-    setLoading(false);
+    try {
+      await Promise.all([
+        loadTenants(),
+        loadApplications(),
+        loadProofs(),
+        loadCatalog(),
+        loadOverview(),
+      ]);
+    } finally {
+      setLoading(false);
+    }
   }, [
     loadApplications,
     loadCatalog,
@@ -534,7 +552,7 @@ function DashboardInner({
     section === "detail"
       ? String(selectedTenant?.organization.name || "Restaurant")
       : section === "profile"
-        ? "Profile"
+        ? t("settings.profile")
         : NAV.find((n) => n.id === section)?.label;
 
   function openSubscribers(view: Partial<SubscriberView>) {
@@ -624,7 +642,9 @@ function DashboardInner({
                     : "text-white/70 hover:bg-white/8 hover:text-white",
                 )}
               >
-                <span>{item.label}</span>
+                <span>
+                  {item.id === "payments" ? t("settings.payments") : item.label}
+                </span>
                 {badge > 0 ? (
                   <span
                     className={cn(
@@ -654,7 +674,7 @@ function DashboardInner({
           onClick={onSignOut}
           className="mt-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/70 hover:bg-white/10 hover:text-white"
         >
-          Sign out
+          {t("nav.signOut")}
         </button>
       </aside>
 
@@ -731,7 +751,7 @@ function DashboardInner({
                 onClick={onSignOut}
                 className="hidden min-h-10 rounded-xl border border-ink/12 px-3 py-2 text-xs font-medium sm:inline-flex lg:hidden"
               >
-                Sign out
+                {t("nav.signOut")}
               </button>
             </div>
           </div>
@@ -792,6 +812,22 @@ function DashboardInner({
 
           {section === "overview" && loading && !stats ? (
             <SectionShimmer />
+          ) : null}
+
+          {section === "overview" && !loading && !stats ? (
+            <div className="rounded-2xl border border-coral/25 bg-white p-5">
+              <p className="font-semibold text-ink">Overview could not load</p>
+              <p className="mt-1 text-sm text-ink/60">
+                {overviewError || "Refresh to try loading platform statistics again."}
+              </p>
+              <button
+                type="button"
+                onClick={() => void loadOverview()}
+                className="mt-4 rounded-xl bg-ink px-4 py-2 text-sm font-medium text-white"
+              >
+                Retry overview
+              </button>
+            </div>
           ) : null}
 
           {section === "overview" && stats ? (
@@ -975,7 +1011,9 @@ function DashboardInner({
                   )}
                 >
                   <Icon className="h-5 w-5" />
-                  <span>{item.short}</span>
+                  <span>
+                    {item.id === "overview" ? t("nav.home") : item.short}
+                  </span>
                   {badge > 0 ? (
                     <span className="absolute right-2 top-0.5 min-w-4 rounded-full bg-coral px-1 text-[9px] font-bold leading-4 text-white">
                       {badge > 9 ? "9+" : badge}

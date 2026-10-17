@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 import { AramisLogo } from "@/components/brand/AramisLogo";
+import { useI18n } from "@/components/i18n/LocaleProvider";
 import { FieldLabel } from "@/components/ui/FieldLabel";
 import { PhoneField } from "@/components/ui/PhoneField";
 import { isOwner } from "@/lib/permissions";
@@ -26,6 +27,7 @@ export function OnboardingScreen() {
     refresh,
     logout,
   } = useAuth();
+  const { t } = useI18n();
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -143,7 +145,7 @@ export function OnboardingScreen() {
           onClick={() => void refresh()}
           className="rounded-xl bg-teal px-5 py-2.5 text-sm font-semibold text-white"
         >
-          Retry
+          {t("pending.retry")}
         </button>
         <button
           type="button"
@@ -151,7 +153,7 @@ export function OnboardingScreen() {
           onClick={() => void handleSignOut()}
           className="text-sm text-ink/55 underline"
         >
-          {signingOut ? "Signing out…" : "Sign out"}
+          {signingOut ? "Signing out…" : t("nav.signOut")}
         </button>
       </div>
     );
@@ -168,7 +170,7 @@ export function OnboardingScreen() {
             onClick={() => void handleSignOut()}
             className="absolute bottom-8 left-1/2 -translate-x-1/2 text-sm text-white/55 underline"
           >
-            {signingOut ? "Signing out…" : "Sign out"}
+            {signingOut ? "Signing out…" : t("nav.signOut")}
           </button>
         ) : null}
       </div>
@@ -196,7 +198,7 @@ export function OnboardingScreen() {
             onClick={() => void handleSignOut()}
             className="shrink-0 rounded-xl border border-ink/15 px-3 py-2 text-sm text-ink/70 hover:bg-white"
           >
-            {signingOut ? "Signing out…" : "Sign out"}
+            {signingOut ? "Signing out…" : t("nav.signOut")}
           </button>
         </div>
         <p className="mt-3 text-sm text-ink/60">
@@ -205,7 +207,9 @@ export function OnboardingScreen() {
           your 14-day trial starts then.
         </p>
         {user.email ? (
-          <p className="mt-1 text-xs text-ink/45">Signed in as {user.email}</p>
+          <p className="mt-1 text-xs text-ink/45">
+            {t("settings.signedInAs", { email: user.email })}
+          </p>
         ) : null}
 
         <form
@@ -219,9 +223,9 @@ export function OnboardingScreen() {
           <label className="block text-sm">
             <FieldLabel required>Business type</FieldLabel>
             <select name="orgType" className="field" defaultValue="cafe">
-              <option value="cafe">Café</option>
-              <option value="restaurant">Restaurant</option>
-              <option value="other">Other</option>
+              <option value="cafe">{t("settings.orgCafe")}</option>
+              <option value="restaurant">{t("settings.orgRestaurant")}</option>
+              <option value="other">{t("settings.orgOther")}</option>
             </select>
           </label>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -236,7 +240,7 @@ export function OnboardingScreen() {
               />
             </label>
             <div className="block text-sm">
-              <FieldLabel required>Phone</FieldLabel>
+              <FieldLabel required>{t("auth.phone")}</FieldLabel>
               <PhoneField required onChange={setPhone} />
             </div>
           </div>
@@ -246,7 +250,7 @@ export function OnboardingScreen() {
           </label>
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="block text-sm">
-              <FieldLabel required>City</FieldLabel>
+              <FieldLabel required>{t("pending.city")}</FieldLabel>
               <input name="city" className="field" required />
             </label>
             <label className="block text-sm">
@@ -260,7 +264,7 @@ export function OnboardingScreen() {
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="block text-sm">
-              <FieldLabel>TIN</FieldLabel>
+              <FieldLabel>{t("pending.tin")}</FieldLabel>
               <input name="tin" className="field" />
             </label>
             <label className="block text-sm">
@@ -298,17 +302,17 @@ export function OnboardingScreen() {
             <p className="text-sm font-semibold text-ink">Modules you want</p>
             {(
               [
-                ["menu", menu, setMenu, "Menu", "Item catalog & recipes"],
-                ["ordering", ordering, setOrdering, "Ordering", "Cashier POS"],
-                ["kitchen", kitchen, setKitchen, "Kitchen", "Barista and kitchen displays"],
-                ["inventory", inventory, setInventory, "Inventory", "Stock & costs"],
-                ["finance", finance, setFinance, "Finance", "Reports & day close"],
-                ["hr", hr, setHr, "HR / Staff", "Team seats & permissions"],
+                ["menu", menu, setMenu, t("module.menu"), "Item catalog & recipes"],
+                ["ordering", ordering, setOrdering, t("module.ordering"), "Cashier POS"],
+                ["kitchen", kitchen, setKitchen, t("module.kitchen"), "Barista and kitchen displays"],
+                ["inventory", inventory, setInventory, t("module.inventory"), "Stock & costs"],
+                ["finance", finance, setFinance, t("module.finance"), "Reports & day close"],
+                ["hr", hr, setHr, t("module.hr"), "Team seats & permissions"],
                 [
                   "online",
                   online,
                   setOnline,
-                  "Website & public ordering",
+                  t("module.online"),
                   "Guest menu page with name and phone",
                 ],
               ] as const

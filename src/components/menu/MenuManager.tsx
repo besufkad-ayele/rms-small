@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Camera, ImagePlus, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { useI18n } from "@/components/i18n/LocaleProvider";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { FieldLabel } from "@/components/ui/FieldLabel";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
@@ -54,6 +55,7 @@ import { cn, formatMoney } from "@/lib/utils";
 
 export function MenuManager() {
   const { tenant } = useAuth();
+  const { t } = useI18n();
   const { refreshPendingCount } = useOfflineSync();
   const orgId = tenant!.organization.id;
   const [menu, setMenu] = useState<CloudMenuItem[]>([]);
@@ -296,21 +298,21 @@ export function MenuManager() {
       <div className="grid gap-4 lg:grid-cols-[1fr_1.1fr]">
         <section className="rounded-3xl border border-ink/8 bg-white/80 p-4 sm:p-5">
           <h2 className="font-display text-xl">
-            {editing ? "Edit item" : "Add menu item"}
+            {editing ? t("menu.editItem") : t("menu.addItem")}
           </h2>
           <form className="mt-4 space-y-3" onSubmit={(e) => void onSubmit(e)}>
             <label className="block text-sm">
-              <FieldLabel required>Name</FieldLabel>
+              <FieldLabel required>{t("common.name")}</FieldLabel>
               <input
                 required
                 className="field"
-                placeholder="e.g. Macchiato"
+                placeholder={t("menu.namePlaceholder")}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
             </label>
             <div>
-              <FieldLabel required>Goes to</FieldLabel>
+              <FieldLabel required>{t("menu.goesTo")}</FieldLabel>
               <div className="grid grid-cols-2 gap-2">
                 {PREP_CHOICES.map((choice) => {
                   const on = prep === choice.id;
@@ -337,7 +339,7 @@ export function MenuManager() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm">
-                <FieldLabel required>Category</FieldLabel>
+                <FieldLabel required>{t("menu.category")}</FieldLabel>
                 <select
                   className="field"
                   value={category}
@@ -351,7 +353,7 @@ export function MenuManager() {
                 </select>
               </label>
               <label className="block text-sm">
-                <FieldLabel required>Price (ETB)</FieldLabel>
+                <FieldLabel required>{t("menu.priceEtb")}</FieldLabel>
                 <input
                   required
                   type="number"
@@ -365,9 +367,9 @@ export function MenuManager() {
             </div>
 
             <div>
-              <FieldLabel>Tags</FieldLabel>
+              <FieldLabel>{t("menu.tags")}</FieldLabel>
               <p className="-mt-1 mb-1.5 text-xs text-ink/40">
-                Starters sort to the top. Food and Drink are chosen above.
+                {t("menu.tagsHint")}
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {MENU_TAGS.map((t) => {
@@ -392,7 +394,7 @@ export function MenuManager() {
               <div className="mt-2 flex gap-2">
                 <input
                   className="field flex-1"
-                  placeholder="Custom tag (e.g. house-favorite)"
+                  placeholder={t("menu.customTag")}
                   value={customTag}
                   onChange={(e) => setCustomTag(e.target.value)}
                   onKeyDown={(e) => {
@@ -407,7 +409,7 @@ export function MenuManager() {
                   onClick={addCustomTag}
                   className="rounded-xl bg-ink px-3 text-sm text-stone"
                 >
-                  Add
+                  {t("common.add")}
                 </button>
               </div>
               {tags.some(
@@ -434,20 +436,20 @@ export function MenuManager() {
             </div>
 
             <label className="block text-sm">
-              <FieldLabel>Description for customers</FieldLabel>
+              <FieldLabel>{t("menu.description")}</FieldLabel>
               <textarea
                 className="field min-h-20"
-                placeholder="What it is, how it tastes, what comes with it"
+                placeholder={t("menu.descriptionPlaceholder")}
                 value={details.summary}
                 onChange={(e) => setDetail("summary", e.target.value)}
               />
             </label>
 
             <label className="block text-sm">
-              <FieldLabel>Ingredients</FieldLabel>
+              <FieldLabel>{t("menu.ingredients")}</FieldLabel>
               <input
                 className="field"
-                placeholder="e.g. pasta, tomato, onion, garlic, basil"
+                placeholder={t("menu.ingredientsPlaceholder")}
                 value={details.ingredients}
                 onChange={(e) => setDetail("ingredients", e.target.value)}
               />
@@ -455,16 +457,16 @@ export function MenuManager() {
 
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm">
-                <FieldLabel>Portion / size</FieldLabel>
+                <FieldLabel>{t("menu.portion")}</FieldLabel>
                 <input
                   className="field"
-                  placeholder="e.g. 1 plate, 250 ml"
+                  placeholder={t("menu.portionPlaceholder")}
                   value={details.portion}
                   onChange={(e) => setDetail("portion", e.target.value)}
                 />
               </label>
               <label className="block text-sm">
-                <FieldLabel>Prep time (min)</FieldLabel>
+                <FieldLabel>{t("menu.prepTime")}</FieldLabel>
                 <input
                   type="number"
                   min={0}
@@ -483,7 +485,7 @@ export function MenuManager() {
             </div>
 
             <div>
-              <FieldLabel>Allergens</FieldLabel>
+              <FieldLabel>{t("menu.allergens")}</FieldLabel>
               <div className="flex flex-wrap gap-1.5">
                 {MENU_ALLERGENS.map((a) => {
                   const on = tags.includes(a.id);
@@ -507,7 +509,7 @@ export function MenuManager() {
             </div>
 
             <div>
-              <FieldLabel>Spice level</FieldLabel>
+              <FieldLabel>{t("menu.spice")}</FieldLabel>
               <div className="flex flex-wrap gap-1.5">
                 {MENU_SPICE_LEVELS.map((s) => {
                   const current =
@@ -533,27 +535,27 @@ export function MenuManager() {
             </div>
 
             <label className="block text-sm">
-              <FieldLabel>Kitchen note</FieldLabel>
+              <FieldLabel>{t("menu.kitchenNote")}</FieldLabel>
               <p className="-mt-1 mb-1 text-xs text-ink/40">
-                Staff only, shown on tickets
+                {t("menu.kitchenNoteHint")}
               </p>
               <input
                 className="field"
-                placeholder="e.g. Plate warm, add basil on top"
+                placeholder={t("menu.kitchenNotePlaceholder")}
                 value={details.kitchenNote}
                 onChange={(e) => setDetail("kitchenNote", e.target.value)}
               />
             </label>
 
             <div className="block text-sm">
-              <FieldLabel>Food photo</FieldLabel>
+              <FieldLabel>{t("menu.foodPhoto")}</FieldLabel>
               <p className="-mt-1 mb-1 text-xs text-ink/40">
-                Saved as WebP under {formatBytes(MENU_IMAGE_MAX_BYTES)}
+                {t("menu.photoHint", { size: formatBytes(MENU_IMAGE_MAX_BYTES) })}
               </p>
               <div className="grid grid-cols-2 gap-2">
                 <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-ink/20 bg-white px-3 py-2.5 text-xs font-medium text-ink/70">
                   <Camera className="h-4 w-4" />
-                  Take photo
+                  {t("menu.takePhoto")}
                   <input
                     type="file"
                     accept="image/*"
@@ -564,7 +566,7 @@ export function MenuManager() {
                 </label>
                 <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-ink/20 bg-white px-3 py-2.5 text-xs font-medium text-ink/70">
                   <ImagePlus className="h-4 w-4" />
-                  Choose from library
+                  {t("menu.chooseLibrary")}
                   <input
                     type="file"
                     accept="image/*"
@@ -585,7 +587,7 @@ export function MenuManager() {
                     <button
                       type="button"
                       onClick={clearPhoto}
-                      aria-label="Remove new photo"
+                      aria-label={t("menu.removePhoto")}
                       className="absolute right-1.5 top-1.5 rounded-full bg-black/60 p-1 text-white"
                     >
                       <X className="h-3.5 w-3.5" />
@@ -601,11 +603,11 @@ export function MenuManager() {
                 checked={available}
                 onChange={(e) => setAvailable(e.target.checked)}
               />
-              Available on POS
+              {t("menu.availablePos")}
             </label>
             <div className="rounded-2xl border border-ink/8 bg-stone/50 p-3">
               <FieldLabel className="font-medium text-ink">
-                Recipe → inventory
+                {t("menu.recipe")}
               </FieldLabel>
               <div className="mt-2 grid grid-cols-[1fr_auto_auto] gap-2">
                 <select
@@ -613,7 +615,7 @@ export function MenuManager() {
                   value={recipeInvId}
                   onChange={(e) => setRecipeInvId(e.target.value)}
                 >
-                  <option value="">Ingredient…</option>
+                  <option value="">{t("menu.ingredient")}</option>
                   {inventory.map((i) => (
                     <option key={i.id} value={i.id}>
                       {i.name} ({i.unit})
@@ -669,7 +671,7 @@ export function MenuManager() {
                           )
                         }
                       >
-                        remove
+                        {t("common.remove")}
                       </button>
                     </li>
                   );
@@ -680,7 +682,7 @@ export function MenuManager() {
               type="submit"
               className="w-full rounded-xl bg-teal py-3 text-sm font-semibold text-white"
             >
-              {editing ? "Save changes" : "Add to menu"}
+              {editing ? t("menu.saveChanges") : t("menu.addToMenu")}
             </button>
             {editing ? (
               <button
@@ -688,7 +690,7 @@ export function MenuManager() {
                 onClick={reset}
                 className="w-full text-sm text-teal underline"
               >
-                Cancel edit
+                {t("menu.cancelEdit")}
               </button>
             ) : null}
             {message ? (
